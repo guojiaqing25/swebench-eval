@@ -57,7 +57,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
       - name: Install official harness
         run: python -m pip install "swebench==5.0.2"
       - name: Evaluate one instance
