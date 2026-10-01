@@ -1,0 +1,129 @@
+name: SWE-bench remote evaluation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/swebench-remote.yml"
+      - "remote_cases/**"
+      - "scripts/collect_remote_swebench_result.py"
+      - "scripts/swebench_feedback.py"
+  workflow_dispatch:
+    inputs:
+      case:
+        description: "instance_id or all"
+        required: true
+        default: all
+      run_label:
+        description: "unique run label"
+        required: true
+        default: manual
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        shell: python
+        env:
+          SELECTED_CASE: ${{ inputs.case || 'all' }}
+        run: |
+          import json, os
+          manifest = json.load(open("remote_cases/manifest.json", encoding="utf-8"))
+          selected = os.environ["SELECTED_CASE"]
+          if selected != "all":
+              manifest = [item for item in manifest if item["instance_id"] == selected]
+          if not manifest:
+              raise SystemExit(f"Unknown case: {selected}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+              stream.write("matrix=" + json.dumps({"include": manifest}, separators=(",", ":")) + "\n")
+
+  evaluate:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install official harness
+        run: python -m pip install "swebench==5.0.2"
+      - name: Evaluate one instance
+        id: eval
+        continue-on-error: true
+        env:
+          INSTANCE_ID: ${{ matrix.instance_id }}
+          DATASET: ${{ matrix.dataset }}
+          PREDICTION: remote_cases/${{ matrix.prediction }}
+          RUN_LABEL: ${{ inputs.run_label || 'push' }}
+        run: |
+          mkdir -p artifacts
+          run_id="${RUN_LABEL}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INSTANCE_ID}"
+          set +e
+          swebench eval "$DATASET" -p "$PREDICTION" --run-id "$run_id" -j 1 -t 3600 -i "$INSTANCE_ID" 2>&1 | tee "artifacts/${INSTANCE_ID}.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          cp -R logs artifacts/logs 2>/dev/null || true
+          cp -R evaluation_results artifacts/evaluation_results 2>/dev/null || true
+          python scripts/collect_remote_swebench_result.py \
+            --instance-id "$INSTANCE_ID" \
+            --dataset "$DATASET" \
+            --exit-code "$code" \
+            --log "artifacts/${INSTANCE_ID}.log" \
+            --root . \
+            --output "artifacts/${INSTANCE_ID}_result.json"
+      - name: Build bounded feedback
+        if: always()
+        shell: bash
+        run: |
+          input="remote_cases/${{ matrix.input }}"
+          if [ -n "${{ matrix.input }}" ] && [ -f "$input" ]; then
+            python scripts/swebench_feedback.py \
+              --input "$input" \
+              --prediction "remote_cases/${{ matrix.prediction }}" \
+              --log "artifacts/${{ matrix.instance_id }}.log" \
+              --evaluation "artifacts/${{ matrix.instance_id }}_result.json" \
+              --output "artifacts/${{ matrix.instance_id }}_feedback_input.json"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swebench-${{ matrix.instance_id }}-${{ inputs.run_label || 'push' }}
+          path: artifacts/
+          retention-days: 14
+      - name: Publish compact result issue
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          INSTANCE_ID: ${{ matrix.instance_id }}
+          RESULT_PATH: artifacts/${{ matrix.instance_id }}_result.json
+          FEEDBACK_PATH: artifacts/${{ matrix.instance_id }}_feedback_input.json
+        with:
+          script: |
+            const fs = require('fs');
+            const result = fs.existsSync(process.env.RESULT_PATH)
+              ? fs.readFileSync(process.env.RESULT_PATH, 'utf8') : '{}';
+            const feedback = fs.existsSync(process.env.FEEDBACK_PATH)
+              ? fs.readFileSync(process.env.FEEDBACK_PATH, 'utf8') : '';
+            const marker = `<!-- swebench:${process.env.INSTANCE_ID}:${context.runId}:${context.runAttempt} -->`;
+            const body = `${marker}\n\n\`\`\`json\n${result.slice(0, 30000)}\n\`\`\``
+              + (feedback ? `\n\n<details><summary>feedback_input</summary>\n\n\`\`\`json\n${feedback.slice(0, 25000)}\n\`\`\`\n</details>` : '')
+              + `\n\n[Actions run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[SWE-bench] ${process.env.INSTANCE_ID} run ${context.runId}`,
+              body
+            });
