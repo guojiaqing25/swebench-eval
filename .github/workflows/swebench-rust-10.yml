@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/swebench-rust-10.yml"
-      - "rust_matrix_10/**"
+      - "rust_matrix_10_v3/**"
       - "scripts/collect_remote_swebench_result.py"
   workflow_dispatch:
 
@@ -24,7 +24,7 @@ jobs:
         shell: python
         run: |
           import json, os
-          manifest = json.load(open("rust_matrix_10/manifest.json", encoding="utf-8"))
+          manifest = json.load(open("rust_matrix_10_v3/manifest.json", encoding="utf-8"))
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
               stream.write("matrix=" + json.dumps({"include": manifest}, separators=(",", ":")) + "\n")
 
@@ -46,7 +46,7 @@ jobs:
       - name: Evaluate one Rust instance
         env:
           INSTANCE_ID: ${{ matrix.instance_id }}
-          PREDICTION: rust_matrix_10/${{ matrix.prediction }}
+          PREDICTION: rust_matrix_10_v3/${{ matrix.prediction }}
         run: |
           mkdir -p artifacts
           run_id="rust10-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INSTANCE_ID}"
