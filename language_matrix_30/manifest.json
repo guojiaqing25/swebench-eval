@@ -1,0 +1,182 @@
+[
+  {
+    "instance_id": "astropy__astropy-12907",
+    "dataset": "verified",
+    "language": "python",
+    "prediction": "astropy__astropy-12907.jsonl"
+  },
+  {
+    "instance_id": "astropy__astropy-13033",
+    "dataset": "verified",
+    "language": "python",
+    "prediction": "astropy__astropy-13033.jsonl"
+  },
+  {
+    "instance_id": "astropy__astropy-13236",
+    "dataset": "verified",
+    "language": "python",
+    "prediction": "astropy__astropy-13236.jsonl"
+  },
+  {
+    "instance_id": "astropy__astropy-13453",
+    "dataset": "verified",
+    "language": "python",
+    "prediction": "astropy__astropy-13453.jsonl"
+  },
+  {
+    "instance_id": "astropy__astropy-13977",
+    "dataset": "verified",
+    "language": "python",
+    "prediction": "astropy__astropy-13977.jsonl"
+  },
+  {
+    "instance_id": "apache__druid-14092",
+    "dataset": "multilingual",
+    "language": "java",
+    "prediction": "apache__druid-14092.jsonl"
+  },
+  {
+    "instance_id": "apache__druid-15402",
+    "dataset": "multilingual",
+    "language": "java",
+    "prediction": "apache__druid-15402.jsonl"
+  },
+  {
+    "instance_id": "apache__druid-16875",
+    "dataset": "multilingual",
+    "language": "java",
+    "prediction": "apache__druid-16875.jsonl"
+  },
+  {
+    "instance_id": "apache__lucene-11760",
+    "dataset": "multilingual",
+    "language": "java",
+    "prediction": "apache__lucene-11760.jsonl"
+  },
+  {
+    "instance_id": "apache__lucene-12212",
+    "dataset": "multilingual",
+    "language": "java",
+    "prediction": "apache__lucene-12212.jsonl"
+  },
+  {
+    "instance_id": "astral-sh__ruff-15309",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15309.jsonl"
+  },
+  {
+    "instance_id": "astral-sh__ruff-15330",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15330.jsonl"
+  },
+  {
+    "instance_id": "astral-sh__ruff-15356",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15356.jsonl"
+  },
+  {
+    "instance_id": "astral-sh__ruff-15394",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15394.jsonl"
+  },
+  {
+    "instance_id": "astral-sh__ruff-15543",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15543.jsonl"
+  },
+  {
+    "instance_id": "caddyserver__caddy-4943",
+    "dataset": "multilingual",
+    "language": "go",
+    "prediction": "caddyserver__caddy-4943.jsonl"
+  },
+  {
+    "instance_id": "caddyserver__caddy-5404",
+    "dataset": "multilingual",
+    "language": "go",
+    "prediction": "caddyserver__caddy-5404.jsonl"
+  },
+  {
+    "instance_id": "caddyserver__caddy-5761",
+    "dataset": "multilingual",
+    "language": "go",
+    "prediction": "caddyserver__caddy-5761.jsonl"
+  },
+  {
+    "instance_id": "caddyserver__caddy-5870",
+    "dataset": "multilingual",
+    "language": "go",
+    "prediction": "caddyserver__caddy-5870.jsonl"
+  },
+  {
+    "instance_id": "caddyserver__caddy-5995",
+    "dataset": "multilingual",
+    "language": "go",
+    "prediction": "caddyserver__caddy-5995.jsonl"
+  },
+  {
+    "instance_id": "jqlang__jq-2235",
+    "dataset": "multilingual",
+    "language": "c",
+    "prediction": "jqlang__jq-2235.jsonl"
+  },
+  {
+    "instance_id": "jqlang__jq-2658",
+    "dataset": "multilingual",
+    "language": "c",
+    "prediction": "jqlang__jq-2658.jsonl"
+  },
+  {
+    "instance_id": "jqlang__jq-2728",
+    "dataset": "multilingual",
+    "language": "c",
+    "prediction": "jqlang__jq-2728.jsonl"
+  },
+  {
+    "instance_id": "jqlang__jq-2839",
+    "dataset": "multilingual",
+    "language": "c",
+    "prediction": "jqlang__jq-2839.jsonl"
+  },
+  {
+    "instance_id": "micropython__micropython-10095",
+    "dataset": "multilingual",
+    "language": "c",
+    "prediction": "micropython__micropython-10095.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-1683",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "prediction": "fmtlib__fmt-1683.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-2317",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "prediction": "fmtlib__fmt-2317.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-2457",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "prediction": "fmtlib__fmt-2457.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-3158",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "prediction": "fmtlib__fmt-3158.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-3248",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "prediction": "fmtlib__fmt-3248.jsonl"
+  }
+]
