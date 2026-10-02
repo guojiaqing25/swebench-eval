@@ -1,0 +1,72 @@
+[
+  {
+    "instance_id": "astral-sh__ruff-15309",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15309.jsonl",
+    "input": "astral-sh__ruff-15309_input.json"
+  },
+  {
+    "instance_id": "astral-sh__ruff-15330",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15330.jsonl",
+    "input": "astral-sh__ruff-15330_input.json"
+  },
+  {
+    "instance_id": "astral-sh__ruff-15356",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15356.jsonl",
+    "input": "astral-sh__ruff-15356_input.json"
+  },
+  {
+    "instance_id": "astral-sh__ruff-15394",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15394.jsonl",
+    "input": "astral-sh__ruff-15394_input.json"
+  },
+  {
+    "instance_id": "astral-sh__ruff-15543",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15543.jsonl",
+    "input": "astral-sh__ruff-15543_input.json"
+  },
+  {
+    "instance_id": "astral-sh__ruff-15626",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "astral-sh__ruff-15626.jsonl",
+    "input": "astral-sh__ruff-15626_input.json"
+  },
+  {
+    "instance_id": "burntsushi__ripgrep-2209",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "burntsushi__ripgrep-2209.jsonl",
+    "input": "burntsushi__ripgrep-2209_input.json"
+  },
+  {
+    "instance_id": "nushell__nushell-12901",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "nushell__nushell-12901.jsonl",
+    "input": "nushell__nushell-12901_input.json"
+  },
+  {
+    "instance_id": "nushell__nushell-12950",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "nushell__nushell-12950.jsonl",
+    "input": "nushell__nushell-12950_input.json"
+  },
+  {
+    "instance_id": "nushell__nushell-13246",
+    "dataset": "multilingual",
+    "language": "rust",
+    "prediction": "nushell__nushell-13246.jsonl",
+    "input": "nushell__nushell-13246_input.json"
+  }
+]
