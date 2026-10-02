@@ -1,6 +1,12 @@
 name: SWE-bench six-language matrix 30
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/swebench-language-matrix-30.yml"
+      - "language_matrix_30/**"
+      - "scripts/collect_remote_swebench_result.py"
   workflow_dispatch:
     inputs:
       run_label:
