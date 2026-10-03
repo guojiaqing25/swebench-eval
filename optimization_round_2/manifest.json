@@ -1,0 +1,26 @@
+[
+  {
+    "instance_id": "astropy__astropy-13033",
+    "dataset": "verified",
+    "language": "python",
+    "prediction": "astropy__astropy-13033.jsonl"
+  },
+  {
+    "instance_id": "caddyserver__caddy-5404",
+    "dataset": "multilingual",
+    "language": "go",
+    "prediction": "caddyserver__caddy-5404.jsonl"
+  },
+  {
+    "instance_id": "jqlang__jq-2235",
+    "dataset": "multilingual",
+    "language": "c",
+    "prediction": "jqlang__jq-2235.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-2317",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "prediction": "fmtlib__fmt-2317.jsonl"
+  }
+]
