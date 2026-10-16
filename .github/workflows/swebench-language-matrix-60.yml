@@ -31,7 +31,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
       - name: Install official harness
         run: python -m pip install "swebench==5.0.2"
       - name: Run official F2P and P2P evaluation
@@ -84,6 +83,7 @@ jobs:
               "reports": reports,
           }
           output = Path("artifacts") / f"{dataset}_summary.json"
+          output.parent.mkdir(parents=True, exist_ok=True)
           output.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps(summary, ensure_ascii=False))
           PY
