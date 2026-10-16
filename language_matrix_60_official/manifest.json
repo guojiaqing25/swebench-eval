@@ -1,0 +1,191 @@
+[
+  {
+    "instance_id": "astropy__astropy-12907",
+    "dataset": "verified",
+    "language": "python",
+    "has_patch": true,
+    "prediction": "astropy__astropy-12907.jsonl"
+  },
+  {
+    "instance_id": "astropy__astropy-13453",
+    "dataset": "verified",
+    "language": "python",
+    "has_patch": true,
+    "prediction": "astropy__astropy-13453.jsonl"
+  },
+  {
+    "instance_id": "astropy__astropy-14365",
+    "dataset": "verified",
+    "language": "python",
+    "has_patch": true,
+    "prediction": "astropy__astropy-14365.jsonl"
+  },
+  {
+    "instance_id": "apache__druid-15402",
+    "dataset": "multilingual",
+    "language": "java",
+    "has_patch": true,
+    "prediction": "apache__druid-15402.jsonl"
+  },
+  {
+    "instance_id": "apache__druid-16875",
+    "dataset": "multilingual",
+    "language": "java",
+    "has_patch": true,
+    "prediction": "apache__druid-16875.jsonl"
+  },
+  {
+    "instance_id": "apache__lucene-11760",
+    "dataset": "multilingual",
+    "language": "java",
+    "has_patch": true,
+    "prediction": "apache__lucene-11760.jsonl"
+  },
+  {
+    "instance_id": "apache__lucene-12212",
+    "dataset": "multilingual",
+    "language": "java",
+    "has_patch": true,
+    "prediction": "apache__lucene-12212.jsonl"
+  },
+  {
+    "instance_id": "apache__lucene-13170",
+    "dataset": "multilingual",
+    "language": "java",
+    "has_patch": true,
+    "prediction": "apache__lucene-13170.jsonl"
+  },
+  {
+    "instance_id": "google__gson-1014",
+    "dataset": "multilingual",
+    "language": "java",
+    "has_patch": true,
+    "prediction": "google__gson-1014.jsonl"
+  },
+  {
+    "instance_id": "google__gson-1093",
+    "dataset": "multilingual",
+    "language": "java",
+    "has_patch": true,
+    "prediction": "google__gson-1093.jsonl"
+  },
+  {
+    "instance_id": "google__gson-1100",
+    "dataset": "multilingual",
+    "language": "java",
+    "has_patch": true,
+    "prediction": "google__gson-1100.jsonl"
+  },
+  {
+    "instance_id": "caddyserver__caddy-6051",
+    "dataset": "multilingual",
+    "language": "go",
+    "has_patch": true,
+    "prediction": "caddyserver__caddy-6051.jsonl"
+  },
+  {
+    "instance_id": "caddyserver__caddy-6115",
+    "dataset": "multilingual",
+    "language": "go",
+    "has_patch": true,
+    "prediction": "caddyserver__caddy-6115.jsonl"
+  },
+  {
+    "instance_id": "caddyserver__caddy-6345",
+    "dataset": "multilingual",
+    "language": "go",
+    "has_patch": true,
+    "prediction": "caddyserver__caddy-6345.jsonl"
+  },
+  {
+    "instance_id": "jqlang__jq-2235",
+    "dataset": "multilingual",
+    "language": "c",
+    "has_patch": true,
+    "prediction": "jqlang__jq-2235.jsonl"
+  },
+  {
+    "instance_id": "jqlang__jq-2658",
+    "dataset": "multilingual",
+    "language": "c",
+    "has_patch": true,
+    "prediction": "jqlang__jq-2658.jsonl"
+  },
+  {
+    "instance_id": "jqlang__jq-2728",
+    "dataset": "multilingual",
+    "language": "c",
+    "has_patch": true,
+    "prediction": "jqlang__jq-2728.jsonl"
+  },
+  {
+    "instance_id": "micropython__micropython-10095",
+    "dataset": "multilingual",
+    "language": "c",
+    "has_patch": true,
+    "prediction": "micropython__micropython-10095.jsonl"
+  },
+  {
+    "instance_id": "micropython__micropython-13039",
+    "dataset": "multilingual",
+    "language": "c",
+    "has_patch": true,
+    "prediction": "micropython__micropython-13039.jsonl"
+  },
+  {
+    "instance_id": "micropython__micropython-15898",
+    "dataset": "multilingual",
+    "language": "c",
+    "has_patch": true,
+    "prediction": "micropython__micropython-15898.jsonl"
+  },
+  {
+    "instance_id": "redis__redis-10068",
+    "dataset": "multilingual",
+    "language": "c",
+    "has_patch": true,
+    "prediction": "redis__redis-10068.jsonl"
+  },
+  {
+    "instance_id": "redis__redis-10095",
+    "dataset": "multilingual",
+    "language": "c",
+    "has_patch": true,
+    "prediction": "redis__redis-10095.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-1683",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "has_patch": true,
+    "prediction": "fmtlib__fmt-1683.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-2317",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "has_patch": true,
+    "prediction": "fmtlib__fmt-2317.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-3248",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "has_patch": true,
+    "prediction": "fmtlib__fmt-3248.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-3750",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "has_patch": true,
+    "prediction": "fmtlib__fmt-3750.jsonl"
+  },
+  {
+    "instance_id": "fmtlib__fmt-3901",
+    "dataset": "multilingual",
+    "language": "cpp",
+    "has_patch": true,
+    "prediction": "fmtlib__fmt-3901.jsonl"
+  }
+]
