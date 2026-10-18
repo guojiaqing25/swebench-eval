@@ -39,9 +39,10 @@ jobs:
           manifest = json.load(open("patcheval-grade/manifest.json", encoding="utf-8"))
           only = []
           # 定向重跑：patcheval-grade/rerun.txt 非空时只跑其中列出的 case
+          # 分隔符同时接受逗号与换行——两种写法都出现过，只认逗号会把整份文件当成一个 case。
           if os.path.exists("patcheval-grade/rerun.txt"):
-              only = [x.strip() for x in open("patcheval-grade/rerun.txt", encoding="utf-8").read().split(",")
-                      if x.strip()]
+              raw = open("patcheval-grade/rerun.txt", encoding="utf-8").read()
+              only = [item.strip() for line in raw.splitlines() for item in line.split(",") if item.strip()]
           if not only:
               only = [x.strip() for x in (os.environ.get("ONLY_CASES") or "").split(",") if x.strip()]
           if only:
