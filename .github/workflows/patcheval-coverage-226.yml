@@ -45,6 +45,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      planned: ${{ steps.matrix.outputs.planned }}
+      only: ${{ steps.matrix.outputs.only }}
     steps:
       - uses: actions/checkout@v4
       - id: matrix
@@ -71,10 +73,23 @@ jobs:
                      for m in manifest]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
               stream.write("matrix=" + json.dumps({"include": include}, separators=(",", ":")) + "\n")
+              stream.write(f"planned={len(include)}\n")
+              # 本次**计划**跑的 case 清单，report job 用它当分母。
+              # 定向重跑/试跑只跑几条时，分母必须跟着缩小——否则汇总脚本会拿
+              # 完整 manifest 去比对，把剩下两百条全判成「静默丢失」，分母校验反而
+              # 每次重跑都变红，久了就没人看这个红灯了。
+              stream.write("only=" + ",".join(m["case_id"] for m in include) + "\n")
+          if not include:
+              # 空矩阵会让 grade job 直接报 "Matrix vector does not contain any values"，
+              # 报错信息完全指不到真实原因（多半是 rerun.txt 或 cases 输入写了清单里
+              # 没有的 ID）。这里提前说清楚，别让人去猜矩阵语法。
+              print("✗ 计划为空：rerun.txt / cases 输入里的 case 一条都不在 226 清单中")
           print(f"cases to grade: {len(include)}")
 
   grade:
     needs: prepare
+    # 空计划直接跳过，避免假失败：没东西可判，不该产出「solved 0/0」的成绩单
+    if: needs.prepare.outputs.planned != '0'
     strategy:
       fail-fast: false
       max-parallel: 8
@@ -119,25 +134,35 @@ jobs:
           if-no-files-found: warn
 
   report:
-    needs: grade
-    if: always()
+    needs: [prepare, grade]
+    # 必须是 always() && 条件：只写条件不带 always()，grade 失败或跳过时
+    # 这个 job 会被连带跳过——而「判分崩了、缺哪几条」恰恰是最需要发 issue 的场景。
+    # 计划为空（0 条）时不发：一份「solved 0/0」的成绩单没有信息量，只会污染对照。
+    if: always() && needs.prepare.outputs.planned != '0'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
+        # continue-on-error：一条 artifact 都没有时（整个矩阵都崩在 checkout/拉镜像）
+        # 这个 action 会直接失败，report 就停在第一步——连「226 条全没结果」这份
+        # 最该看到的报告都发不出来。宁可拿空目录继续跑，让汇总把缺失逐条列清。
+        continue-on-error: true
         with:
           path: artifacts
       - name: Aggregate results
+        env:
+          PLANNED_ONLY: ${{ needs.prepare.outputs.only }}
         run: |
           mkdir -p summary
           # 汇总逻辑放在 patcheval-grade/summarize_coverage.py：
-          # 它负责分母完整性校验（manifest 里有、results 里没有的 case 全部列出来）。
+          # 它负责分母完整性校验（计划里有、results 里没有的 case 全部列出来）。
           # 注意这里**不让它失败**——后面还要发 issue，issue 里必须能看到缺了哪几条；
           # 是否真的缺，交给最后那个 "Verify denominator" 步骤判定。
           python3 patcheval-grade/summarize_coverage.py \
             --artifacts artifacts \
             --manifest patcheval-coverage/manifest.json \
             --subset patcheval-coverage/subset58.txt \
+            --only "$PLANNED_ONLY" \
             --out summary/patcheval_coverage_summary.json || true
       - uses: actions/upload-artifact@v4
         with:
@@ -171,13 +196,20 @@ jobs:
                 + infra.map(r => `| ${r.case_id} | ${String(r.detail).replace(/\|/g, '\\|')} |`).join('\n')
                 + `\n\n</details>\n\n`
               : '';
-            const body = `${marker}\n\n**全量覆盖集 226 条（Go/JS/Py, CWE 39 类）**\n\n`
+            const body = `${marker}\n\n`
+              + (data.scoped
+                  ? `**定向重跑（本次计划 ${data.manifest_total} 条，非全量 226）**\n\n`
+                  : `**全量覆盖集 226 条（Go/JS/Py, CWE 39 类）**\n\n`)
               + `graded ${data.graded}/${data.total} · solved **${data.solved} `
               + `(${(data.solve_rate * 100).toFixed(1)}%)** · 排除 infra ${data.excluded_infra} 条\n\n`
               + missingBlock
-              + `其中 58 条均衡子集：solved ${data.subset58.solved}/${data.subset58.graded} `
-              + `(${(data.subset58.solve_rate * 100).toFixed(1)}%)`
-              + `——与全量同批同判据，可直接对照「子集 vs 全量」的差异。\n\n`
+              + (data.scoped
+                  // 定向重跑只覆盖少数 case，套用「58 条子集」口径毫无意义，
+                  // 更糟的是会让人把这几条的通过率当成整体成绩。
+                  ? `> 本次只跑了清单里的指定 case，结果不能当作全量分数引用。\n\n`
+                  : `其中 58 条均衡子集：solved ${data.subset58.solved}/${data.subset58.graded} `
+                    + `(${(data.subset58.solve_rate * 100).toFixed(1)}%)`
+                    + `——与全量同批同判据，可直接对照「子集 vs 全量」的差异。\n\n`)
               + `状态分布：${JSON.stringify(data.status_counts)}\n\n`
               + `> 空补丁（no_patch）计 ${data.no_patch} 条、apply_failed ${data.apply_failed} 条，`
               + `全部计入分母——生成不出、贴不上就是没修好。\n\n`
@@ -191,7 +223,10 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[PatchEval coverage 226] run ${context.runId}: solved ${data.solved}/${data.graded}`,
+              title: (data.scoped
+                ? `[PatchEval coverage] 定向重跑 ${data.manifest_total} 条: `
+                : `[PatchEval coverage 226] run ${context.runId}: `)
+                + `solved ${data.solved}/${data.graded}`,
               body
             });
       - name: Verify denominator is complete

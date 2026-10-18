@@ -9,7 +9,10 @@ on:
   push:
     branches: [main]
     paths:
-      - ".github/workflows/patcheval-verified-58.yml"
+      # 刻意**不把自己列进来**：改 workflow 顺带触发的全量判分会拿空 patches 跑一遍，
+      # 得到「58 条全 no_patch、solved 0/58」——纯配置动作造成的「全军覆没」，
+      # 和模型能力无关。226 那条线早就这么改了，这里保持同一规矩，
+      # 否则每次调判分脚本都会在 issue 列表里多一条假失败。
       - "patcheval-grade/patches/**"
       - "patcheval-grade/rerun.txt"
   workflow_dispatch:
@@ -28,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      planned: ${{ steps.matrix.outputs.planned }}
+      only: ${{ steps.matrix.outputs.only }}
     steps:
       - uses: actions/checkout@v4
       - id: matrix
@@ -51,9 +56,18 @@ jobs:
                      for m in manifest]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
               stream.write("matrix=" + json.dumps({"include": include}, separators=(",", ":")) + "\n")
+              stream.write(f"planned={len(include)}\n")
+              # 分母 = 本次计划的那几条。定向重跑只跑 6 条时，若仍拿完整 58 条清单
+              # 去比对，会凭空多出 52 条「静默丢失」，分母校验每次重跑都变红。
+              stream.write("only=" + ",".join(m["case_id"] for m in include) + "\n")
+          if not include:
+              print("✗ 计划为空：rerun.txt / cases 输入里的 case 一条都不在 58 条清单中")
+          print(f"cases to grade: {len(include)}")
 
   grade:
     needs: prepare
+    # 空计划直接跳过：没东西可判，不该报矩阵错误也不该产出 0/0 的成绩单
+    if: needs.prepare.outputs.planned != '0'
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -89,24 +103,33 @@ jobs:
           if-no-files-found: warn
 
   report:
-    needs: grade
-    if: always()
+    needs: [prepare, grade]
+    # always() 不能省：只写条件时 grade 失败/跳过会连带跳过 report，
+    # 而「判分崩了、缺哪几条」正是最该被发出来的情况。
+    if: always() && needs.prepare.outputs.planned != '0'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
+        # continue-on-error：一条 artifact 都没有时（整个矩阵都崩在 checkout/拉镜像）
+        # 这个 action 会直接失败，report 就停在第一步——连「226 条全没结果」这份
+        # 最该看到的报告都发不出来。宁可拿空目录继续跑，让汇总把缺失逐条列清。
+        continue-on-error: true
         with:
           path: artifacts
       - name: Aggregate results
+        env:
+          PLANNED_ONLY: ${{ needs.prepare.outputs.only }}
         run: |
           mkdir -p summary
-          # 复用覆盖集的汇总脚本：它带分母完整性校验（manifest 里有、results 里没有的
+          # 复用覆盖集的汇总脚本：它带分母完整性校验（计划里有、results 里没有的
           # case 全部列出来）。58 条这条线此前没有这道校验，某个 job 崩掉时
           # 该 case 会静默消失、分母变小，而报告上完全看不出来。
           python3 patcheval-grade/summarize_coverage.py \
             --artifacts artifacts \
             --manifest patcheval-grade/manifest.json \
             --subset patcheval-grade/none.txt \
+            --only "$PLANNED_ONLY" \
             --out summary/patcheval_summary.json || true
       - uses: actions/upload-artifact@v4
         with:
@@ -124,12 +147,19 @@ jobs:
             const detail = (data.rows || []).map(r =>
               `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} |`
             ).join('\n');
-            const body = `${marker}\n\n**graded ${data.graded}/${data.total} · solved ${data.solved} `
+            const body = `${marker}\n\n`
+              + (data.scoped
+                  ? `**定向重跑（本次计划 ${data.manifest_total} 条，非全量 58）**\n\n`
+                  : '')
+              + `**graded ${data.graded}/${data.total} · solved ${data.solved} `
               + `(${(data.solve_rate * 100).toFixed(1)}%)**\n\n`
               + ((data.missing || []).length
                   ? `⚠ **${data.missing.length} 条 case 没有任何判分结果**（分母不完整）：`
                     + `${data.missing.slice(0, 10).join(', ')}\n\n`
                   : `✅ 分母完整：${data.manifest_total} 条全部有结果。\n\n`)
+              + (data.scoped
+                  ? `> 本次只补跑了指定 case，不能当作 58 条基线的整体分数引用。\n\n`
+                  : '')
               + `状态分布：${JSON.stringify(data.status_counts)}\n\n`
               + `| language | solved |\n|---|---|\n${langRows || '| - | - |'}\n\n`
               + `<details><summary>逐条结果</summary>\n\n| case | status | solved |\n|---|---|---|\n`
@@ -142,3 +172,17 @@ jobs:
               title: `[PatchEval-verified 58] run ${context.runId}: solved ${data.solved}/${data.graded}`,
               body
             });
+      - name: Verify denominator is complete
+        # 与 226 那条线同一个规矩：issue 先发出去（缺哪几条写在里面），
+        # 这里才决定 job 红不红。58 条是趋势基线，分母悄悄缩水会让
+        # 「改造前后有没有效果」的结论不可比——宁可显红，也不要交一份虚高的成绩单。
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          data = json.load(open("summary/patcheval_summary.json", encoding="utf-8"))
+          missing = data.get("missing") or []
+          if missing:
+              print(f"✗ 分母不完整：{len(missing)} 条 case 没有判分结果 -> {missing[:20]}")
+              sys.exit(1)
+          print(f"✓ 分母完整：{data['manifest_total']} 条全部有结果")
+          PY
