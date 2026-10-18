@@ -179,6 +179,18 @@ jobs:
               .sort((a, b) => b[1].total - a[1].total)
               .map(([k, v]) => `| ${k} | ${v.solved}/${v.total} | ${(v.solved / v.total * 100).toFixed(1)}% |`)
               .join('\n');
+            // 分语言必须同时给整体率与条件率：JS 整体只有 24%，但其中 29 条
+            // 是压根没生成补丁。只看整体会得出「JS 修不好」的结论，
+            // 实际是「JS 生成不出补丁」——这两件事的改法完全不同。
+            const langRows = (d) => Object.entries(d.by_language || {})
+              .sort((a, b) => b[1].total - a[1].total)
+              .map(([k, v]) => {
+                const cond = v.patched ? (v.patched_solved / v.patched * 100).toFixed(1) + '%' : '-';
+                return `| ${k} | ${v.solved}/${v.total} | `
+                  + `${(v.solved / v.total * 100).toFixed(1)}% | `
+                  + `${v.patched_solved}/${v.patched} | ${cond} |`;
+              })
+              .join('\n');
             const detail = (data.rows || []).map(r =>
               `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} | `
               + `${String(r.detail || '').replace(/\|/g, '\\|').slice(0, 160)} |`
@@ -213,8 +225,19 @@ jobs:
               + `状态分布：${JSON.stringify(data.status_counts)}\n\n`
               + `> 空补丁（no_patch）计 ${data.no_patch} 条、apply_failed ${data.apply_failed} 条，`
               + `全部计入分母——生成不出、贴不上就是没修好。\n\n`
+              // 两个通过率必须并列：整体=端到端（含生成失败），条件=有补丁前提下
+              // 修对的比例。下面分语言表如果不区分这两者，JS 会因为空补丁多而
+              // 显得特别差，看上去像「JS 修不好」，实际是「JS 生成不出补丁」。
+              + `**条件通过率**（只算生成了补丁的 case）：`
+              + `solved ${data.patched_solved}/${data.patched_total} `
+              + `(${(data.patched_solve_rate * 100).toFixed(1)}%)`
+              + `——整体 ${(data.solve_rate * 100).toFixed(1)}% 与它的差额，`
+              + `就是「补丁没生成出来」这一段损失。\n\n`
               + infraBlock
-              + `### 分语言\n\n| language | solved/total | rate |\n|---|---|---|\n${rows(data.by_language) || '| - | - | - |'}\n\n`
+              + `### 分语言\n\n`
+              + `| language | 整体 solved/total | 整体率 | 有补丁 solved/total | 条件率 |\n`
+              + `|---|---|---|---|---|\n`
+              + `${langRows(data) || '| - | - | - | - | - |'}\n\n`
               + `### 分 CWE\n\n| cwe | solved/total | rate |\n|---|---|---|\n${rows(data.by_cwe) || '| - | - | - |'}\n\n`
               + `<details><summary>逐条结果</summary>\n\n| case | status | solved | 说明 |\n|---|---|---|---|\n`
               + `${detail}\n\n</details>\n\n`

@@ -57,12 +57,26 @@ def dedupe(rows: list[dict]) -> list[dict]:
 
 
 def bucket(rows: list[dict], key_of) -> dict[str, dict[str, int]]:
+    """按某个维度分桶统计。
+
+    同时给出两组数：
+    - total / solved：整体口径，no_patch 也算进分母（端到端能不能修好）
+    - patched / patched_solved：条件口径，只算真生成了补丁的 case
+      （在「有补丁」前提下修对多少）
+
+    两组必须都留着。只给条件口径等于把没生成出来的悄悄剔出分母，
+    那是最坏的一种「让数字变好看」；只给整体口径则定位不到问题在哪一环。
+    """
     table: dict[str, dict[str, int]] = {}
     for row in rows:
         key = key_of(row)
-        slot = table.setdefault(key, {"total": 0, "solved": 0})
+        slot = table.setdefault(key, {"total": 0, "solved": 0, "patched": 0, "patched_solved": 0})
+        hit = 1 if row.get("solved") else 0
         slot["total"] += 1
-        slot["solved"] += 1 if row.get("solved") else 0
+        slot["solved"] += hit
+        if str(row.get("status")) != "no_patch":
+            slot["patched"] += 1
+            slot["patched_solved"] += hit
     return table
 
 
@@ -92,6 +106,7 @@ def main() -> int:
     args = parser.parse_args()
 
     manifest = json.load(open(args.manifest, encoding="utf-8"))
+    full_total = len(manifest)
     planned_ids = split_ids(args.only)
     if planned_ids:
         known = {str(m["case_id"]) for m in manifest}
@@ -102,6 +117,10 @@ def main() -> int:
             print(f"✗ --only 里有 {len(unknown)} 条不在 manifest：{unknown[:10]}")
             return 1
         manifest = [m for m in manifest if str(m["case_id"]) in set(planned_ids)]
+    # scoped 的含义是「本次只跑了清单的一部分」，不是「传了 --only」。
+    # 全量跑也会传 --only（把计划清单透传下来），若只按「是否传参」判断，
+    # 226 条的全量成绩单会被标题写成「定向重跑」，读者会以为不能当整体分数引用。
+    scoped = bool(planned_ids) and len(manifest) < full_total
     langs = {m["case_id"]: m.get("language", "unknown") for m in manifest}
     cwes = {m["case_id"]: m.get("cwe_id", "") for m in manifest}
 
@@ -114,6 +133,18 @@ def main() -> int:
     graded = [r for r in rows if r.get("status") != "infra_error"]
     solved = sum(1 for r in graded if r.get("solved"))
     counts = collections.Counter(str(r.get("status")) for r in rows)
+
+    # 条件通过率：只算「确实生成了补丁」的那些 case。
+    #
+    # 为什么必须单独给这个数：整体通过率把 no_patch 也算进分母，它衡量的是
+    # 「端到端能不能修好」——这当然是最该看的数，但它把两件事揉在了一起：
+    # 生成不出补丁，和补丁修不对。改造生成环节后整体通过率会动，可到底是
+    # 生成率变了还是修复质量变了，从单一数字看不出来。
+    # 两个数并列给：整体=端到端，条件=在「有补丁」前提下修对的比例。
+    # 只报条件通过率是作弊（等于把没生成出来的悄悄剔出分母），
+    # 只报整体则无法定位问题出在哪一环。
+    patched = [r for r in graded if r.get("status") != "no_patch"]
+    patched_solved = sum(1 for r in patched if r.get("solved"))
 
     # 分母完整性：manifest 里有、results 里没有的，必须逐条列出。
     seen = {str(r.get("case_id")) for r in rows}
@@ -133,13 +164,17 @@ def main() -> int:
         # manifest_total 现在是「本次计划范围」的条数：全量跑=226，定向重跑=计划的那几条。
         # 分母永远等于计划，而不是永远等于 226——否则定向重跑每次都会红。
         "manifest_total": len(manifest),
-        "scoped": bool(planned_ids),
+        "scoped": scoped,
         "total": len(rows),
         "results_total": len(rows),
         "graded": len(graded),
         "excluded_infra": len(rows) - len(graded),
         "solved": solved,
         "solve_rate": (solved / len(graded)) if graded else 0.0,
+        # 条件通过率与整体通过率必须成对出现（理由见上文注释）
+        "patched_total": len(patched),
+        "patched_solved": patched_solved,
+        "patched_solve_rate": (patched_solved / len(patched)) if patched else 0.0,
         "status_counts": dict(counts),
         "by_language": bucket(graded, lambda r: langs.get(str(r.get("case_id")), "unknown")),
         "by_cwe": dict(sorted(bucket(graded, lambda r: cwes.get(str(r.get("case_id")), "")).items())),

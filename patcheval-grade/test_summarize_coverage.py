@@ -122,6 +122,20 @@ class SummarizeCoverageTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(d["manifest_total"], 2)
 
+    def test_full_plan_passed_via_only_is_not_scoped(self) -> None:
+        """全量跑也会透传 --only，但它不是「定向重跑」。
+
+        若按「是否传 --only」判断 scoped，226 条的全量成绩单会被标题写成
+        「定向重跑、不能当整体分数引用」——一份完整成绩被自己的报告否掉。
+        """
+        write_result(self.art, "cov-CVE-1", "CVE-1", "solved")
+        write_result(self.art, "cov-CVE-2", "CVE-2", "solved")
+        write_result(self.art, "cov-CVE-3", "CVE-3", "solved")
+        rc, d = self.run_summary("--only", "CVE-1,CVE-2,CVE-3")
+        self.assertEqual(rc, 0)
+        self.assertEqual(d["manifest_total"], 3)
+        self.assertFalse(d["scoped"])
+
     def test_unknown_case_in_only_is_an_error(self) -> None:
         """点名的 case 不在清单里 = 运行配置和清单不同源，不能静默当成「已计划缺失」。"""
         rc, _ = self.run_summary("--only", "CVE-1,CVE-NOT-EXIST")
@@ -167,6 +181,44 @@ class SummarizeCoverageTest(unittest.TestCase):
         self.assertEqual(d["subset58"]["solved"], 1)
         # 整体 1/3，子集 1/2 —— 两个口径不能互相污染
         self.assertAlmostEqual(d["solve_rate"], 1 / 3)
+
+    def test_conditional_rate_excludes_only_no_patch(self) -> None:
+        """条件通过率只剔 no_patch，不剔 test_failed。
+
+        这两个数必须能分开看：整体通过率回答「端到端能不能修好」，
+        条件通过率回答「生成出补丁的前提下修对多少」。把 test_failed 也剔掉
+        就成了只数成功案例的假指标，那才是最坏的作弊方式。
+        """
+        write_result(self.art, "cov-CVE-1", "CVE-1", "solved")
+        write_result(self.art, "cov-CVE-2", "CVE-2", "test_failed")
+        write_result(self.art, "cov-CVE-3", "CVE-3", "no_patch")
+        rc, d = self.run_summary()
+        self.assertEqual(rc, 0)
+        self.assertEqual(d["graded"], 3)
+        self.assertAlmostEqual(d["solve_rate"], 1 / 3)
+        # 有补丁的两条里对了一条
+        self.assertEqual(d["patched_total"], 2)
+        self.assertEqual(d["patched_solved"], 1)
+        self.assertAlmostEqual(d["patched_solve_rate"], 0.5)
+
+    def test_conditional_rate_ignores_apply_failed_and_timeout(self) -> None:
+        """apply_failed / test_timeout 都是「有补丁」，必须留在条件分母里。"""
+        write_result(self.art, "cov-CVE-1", "CVE-1", "solved")
+        write_result(self.art, "cov-CVE-2", "CVE-2", "apply_failed")
+        write_result(self.art, "cov-CVE-3", "CVE-3", "test_timeout")
+        rc, d = self.run_summary()
+        self.assertEqual(rc, 0)
+        self.assertEqual(d["patched_total"], 3)
+        self.assertAlmostEqual(d["patched_solve_rate"], 1 / 3)
+
+    def test_conditional_rate_is_zero_when_nothing_patched(self) -> None:
+        """全都没生成出补丁时不能除零，也不能给出好看的 0% 以外的数。"""
+        for case_id in ("CVE-1", "CVE-2", "CVE-3"):
+            write_result(self.art, f"cov-{case_id}", case_id, "no_patch")
+        rc, d = self.run_summary()
+        self.assertEqual(rc, 0)
+        self.assertEqual(d["patched_total"], 0)
+        self.assertEqual(d["patched_solve_rate"], 0.0)
 
 
 if __name__ == "__main__":
