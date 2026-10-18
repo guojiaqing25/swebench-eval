@@ -22,12 +22,19 @@ on:
       # 案例集变了就要重验区分度：新案例可能带着一个对漏洞无感的测试
       - "patcheval-coverage/manifest.json"
       - ".github/workflows/patcheval-control.yml"
+      # 手动重跑的开关：改这个文件内容（比如写上本次要验证的批次说明）即触发。
+      # 之所以不用 workflow_dispatch：本地没有 gh CLI，网页点按钮不方便；
+      # 用一个内容可读的文件来触发，还能顺便把「这次为什么重跑」留在仓库历史里。
+      - "patcheval-coverage/control_rerun.txt"
   workflow_dispatch:
     inputs:
       sample:
-        description: '抽样条数（0=全部）'
+        description: '抽样条数（0=全部 226 条）'
         required: false
-        default: '40'
+        # 默认跑全量而不是抽样：抽样只能证明「抽到的这部分题目有区分度」，
+        # 证明不了整套 226 条。既然这是「全面性」的核心证据，就不能只交一份抽样。
+        # 全量约 30~50 分钟（8 并发），与判分并行，不占额外等待时间。
+        default: '0'
       grade_dir:
         description: '判分目录名（patcheval-coverage 或 patcheval-grade）'
         required: false
@@ -43,6 +50,8 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       grade_dir: ${{ steps.matrix.outputs.grade_dir }}
+      planned: ${{ steps.matrix.outputs.planned }}
+      cases: ${{ steps.matrix.outputs.cases }}
     steps:
       - uses: actions/checkout@v4
       - id: matrix
@@ -60,7 +69,10 @@ jobs:
           # 40 条里 30 条假 infra，把「跑不起来」伪装成了「环境故障」。
           grade_dir = (os.environ.get("GRADE_DIR") or "").strip() or "patcheval-coverage"
           manifest = json.load(open(f"{grade_dir}/manifest.json", encoding="utf-8"))
-          sample = (os.environ.get("SAMPLE") or "40").strip()
+          # 默认全量（0=不抽样）：抽样只能证明抽到的那部分有区分度，
+          # 抽不到的 186 条仍然是「未验证」。既然对照组是「全面性」的核心证据，
+          # 就必须一条不漏地跑。想快速验通路时可以手动传 sample=40。
+          sample = (os.environ.get("SAMPLE") or "0").strip()
           if sample.isdigit() and int(sample) > 0:
               # 等距抽样：跨语言、跨年份、跨 CWE 均匀取，避免只抽到某一类
               step = max(1, len(manifest) // int(sample))
@@ -70,6 +82,13 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
               stream.write("matrix=" + json.dumps({"include": include}, separators=(",", ":")) + "\n")
               stream.write(f"grade_dir={grade_dir}\n")
+              # 全量跑时下游要知道总数：对照组报告要能说「226 条里 225 条有区分度」，
+              # 只报「已检查 N 条」无法区分「本来只有 N 条」和「N 条里有 100 条没跑起来」。
+              stream.write(f"planned={len(include)}\n")
+              # 案例清单也一并传下去：report job 用它反查「哪几条根本没产出结果」
+              # （job 崩了/artifact 没上传）。缺了不报，对照组就会安静地只统计跑通的部分，
+              # 而「没跑起来」恰恰是最容易被当成「有区分度」糊过去的地方。
+              stream.write("cases=" + ",".join(m["case_id"] for m in include) + "\n")
           print(f"control cases: {len(include)} from {grade_dir}")
 
   control:
@@ -132,10 +151,13 @@ jobs:
         with:
           path: artifacts
       - name: Summarize control
+        env:
+          PLANNED: ${{ needs.prepare.outputs.planned }}
+          CASES: ${{ needs.prepare.outputs.cases }}
         run: |
           mkdir -p summary
           python3 - <<'PY'
-          import glob, json, collections
+          import glob, json, collections, os
           rows = []
           for path in glob.glob("artifacts/**/results/*.json", recursive=True):
               try:
@@ -155,9 +177,17 @@ jobs:
           timeout = sorted(r["case_id"] for r in valid if r.get("status") == "test_timeout")
           discriminating = sorted(r["case_id"] for r in valid if r.get("status") == "test_failed")
           counts = collections.Counter(str(r.get("status")) for r in valid)
+          # 计划跑的清单 vs 实际拿到结果的清单：差集就是「连结果都没产出」的 case
+          # （job 崩了、artifact 没上传、超时被杀）。这些既不是「有区分度」也不是 infra，
+          # 只能算「未验证」。不单独列出来，报告会安静地只统计跑通的部分，
+          # 把「没跑起来」当成「有区分度」混过去。
+          planned = [x for x in (os.environ.get("CASES") or "").split(",") if x.strip()]
+          unverified = sorted(set(planned) - {str(r.get("case_id")) for r in rows})
           payload = {
+              "planned": len(planned),
               "checked": len(valid),
               "excluded_infra": len(rows) - len(valid),
+              "unverified": unverified,
               "discriminating": len(discriminating),
               "discriminating_cases": discriminating,
               "no_discrimination": bad,
@@ -198,10 +228,19 @@ jobs:
             const badge = (d.excluded_infra || 0)
               ? `排除 infra **${d.excluded_infra}** 条（原因见下）`
               : `排除 infra 0 条`;
+            const unverified = d.unverified || [];
+            const unverifiedBlock = unverified.length
+              ? `⚠ **有 ${unverified.length} 条 case 连结果都没产出**（不在任何 artifact 里）：`
+                + `这些既不算有区分度也不算无区分度，属「未验证」，不能计入覆盖率。\n\n`
+                + unverified.map(id => `- ${id}`).join('\n') + '\n\n'
+              : (d.planned
+                  ? `✅ 计划 ${d.planned} 条全部产出结果，没有静默丢失。\n\n`
+                  : '');
             const body = `${marker}\n\n**对照组：不打补丁直接跑官方测试（必须失败）**\n\n`
-              + `已检查 ${d.checked} 条 · 有区分度 **${d.discriminating}** 条 · `
+              + `计划 ${d.planned || '?'} 条 · 已检查 ${d.checked} 条 · 有区分度 **${d.discriminating}** 条 · `
               + `无区分度 **${d.no_discrimination.length}** 条 · `
               + `超时（结论不明）${(d.inconclusive_timeout || []).length} 条 · ${badge}\n\n`
+              + unverifiedBlock
               + `状态分布：${JSON.stringify(d.status_counts)}\n\n`
               + (d.no_discrimination.length
                   ? `⚠ 以下 case 未打补丁也会通过，测试对该漏洞无区分度，评估时须剔除：\n${bad}\n\n`
@@ -226,3 +265,19 @@ jobs:
               title: `[PatchEval control] 无补丁基线: 有区分度 ${d.discriminating}/${d.checked}`,
               body
             });
+      - name: Verify every planned case was actually checked
+        # issue 已经发出去（缺哪几条写在里面），这里才决定这个 job 红不红。
+        # 「有区分度 37/38」和「有区分度 37/226」是天差地别的两个结论，
+        # 只看后者里的分子会让人以为已经全量验证过了。
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("summary/control_summary.json", encoding="utf-8"))
+          unverified = d.get("unverified") or []
+          if unverified:
+              print(f"✗ {len(unverified)} 条 case 未产出结果，对照组覆盖率不完整：{unverified[:20]}")
+              sys.exit(1)
+          print(f"✓ 计划 {d.get('planned')} 条全部有判定结果"
+                f"（有区分度 {d['discriminating']}、无区分度 {len(d['no_discrimination'])}、"
+                f"超时 {len(d['inconclusive_timeout'])}、infra {d['excluded_infra']}）")
+          PY

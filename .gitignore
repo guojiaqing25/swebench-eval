@@ -1,2 +1,5 @@
 __pycache__/
 *.py[cod]
+
+# 判分产物：本地下载的 artifact 不入库（里面是 results 与测试日志）
+.artifacts/

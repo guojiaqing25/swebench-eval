@@ -18,7 +18,11 @@ on:
   push:
     branches: [main]
     paths:
-      - ".github/workflows/patcheval-coverage-226.yml"
+      # 只由「补丁入库」和「手动重跑」触发。
+      # 刻意**不把自己列进来**：改 workflow 顺带触发的全量判分会用空 patches 跑一遍，
+      # 结果是 226 条全 no_patch、issue 标题写着 solved 0/226——
+      # 一个纯属自己配置动作造成的「全军覆没」，和模型能力毫无关系，
+      # 留在 issue 列表里只会污染历次对照。
       - "patcheval-coverage/patches/**"
       - "patcheval-coverage/rerun.txt"
   workflow_dispatch:
@@ -86,7 +90,16 @@ jobs:
         env:
           CASE_ID: ${{ matrix.case_id }}
           GRADE_DIR_NAME: patcheval-coverage
+        # 拉取失败不能中断这个 job：一旦中断，后面「Grade one CVE」不跑 → 没有 result.json
+        # → 该 case 在汇总里**静默消失**，分母悄悄变小。宁可让 grade_task 判定
+        # 「缺 _run_test.sh → infra_error」，至少它出现在 excluded_infra 里带原因。
+        continue-on-error: true
         run: bash patcheval-grade/fetch_tests.sh "$CASE_ID"
+      - name: Log in to ghcr (raise anonymous pull limit)
+        # 226 条矩阵并发拉 ghcr，匿名限额很容易打满，表现是「大批 pull 失败 → 全 infra」。
+        # 那会把「环境拉不下来」伪装成「模型不会修」，等于凭空造出一批 infra 排除项。
+        continue-on-error: true
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Grade one CVE
         env:
           CASE_ID: ${{ matrix.case_id }}
@@ -117,60 +130,15 @@ jobs:
       - name: Aggregate results
         run: |
           mkdir -p summary
-          python3 - <<'PY'
-          import glob, json, os, collections
-          rows = []
-          for path in glob.glob("artifacts/**/results/*.json", recursive=True):
-              try:
-                  rows.append(json.load(open(path, encoding="utf-8")))
-              except Exception as exc:
-                  rows.append({"case_id": os.path.basename(path), "status": "infra_error",
-                               "detail": str(exc), "solved": False})
-          rows.sort(key=lambda r: str(r.get("case_id")))
-          counts = collections.Counter(str(r.get("status")) for r in rows)
-          graded = [r for r in rows if r.get("status") != "infra_error"]
-          solved = sum(1 for r in graded if r.get("solved"))
-          manifest = json.load(open("patcheval-coverage/manifest.json", encoding="utf-8"))
-          langs = {m["case_id"]: m.get("language", "unknown") for m in manifest}
-          cwes = {m["case_id"]: m.get("cwe_id", "") for m in manifest}
-          by_lang, by_cwe = {}, {}
-          for r in graded:
-              cid = str(r.get("case_id"))
-              for table, key in ((by_lang, langs.get(cid, "unknown")),
-                                 (by_cwe, cwes.get(cid, ""))):
-                  bucket = table.setdefault(key, {"total": 0, "solved": 0})
-                  bucket["total"] += 1
-                  bucket["solved"] += 1 if r.get("solved") else 0
-          # 58 条均衡子集是 226 条的子集，同一次判分里顺带给出它的分数：
-          # 「均衡子集 vs 全量」并列才有意义——单看一个数字分不清是能力变了还是题目变了。
-          subset58 = set()
-          if os.path.exists("patcheval-coverage/subset58.txt"):
-              raw = open("patcheval-coverage/subset58.txt", encoding="utf-8").read()
-              subset58 = {line.strip() for line in raw.splitlines() if line.strip()}
-          sub_rows = [r for r in graded if str(r.get("case_id")) in subset58]
-          sub_solved = sum(1 for r in sub_rows if r.get("solved"))
-          payload = {
-              "total": len(rows),
-              "graded": len(graded),
-              "excluded_infra": len(rows) - len(graded),
-              "solved": solved,
-              "solve_rate": (solved / len(graded)) if graded else 0.0,
-              "status_counts": dict(counts),
-              "by_language": by_lang,
-              "by_cwe": dict(sorted(by_cwe.items())),
-              "no_patch": counts.get("no_patch", 0),
-              "subset58": {
-                  "graded": len(sub_rows),
-                  "solved": sub_solved,
-                  "solve_rate": (sub_solved / len(sub_rows)) if sub_rows else 0.0,
-              },
-              "rows": rows,
-          }
-          json.dump(payload, open("summary/patcheval_coverage_summary.json", "w", encoding="utf-8"),
-                    ensure_ascii=False, indent=1)
-          print(f"graded={len(graded)} solved={solved} excluded_infra={payload['excluded_infra']}"
-                f" status={dict(counts)}")
-          PY
+          # 汇总逻辑放在 patcheval-grade/summarize_coverage.py：
+          # 它负责分母完整性校验（manifest 里有、results 里没有的 case 全部列出来）。
+          # 注意这里**不让它失败**——后面还要发 issue，issue 里必须能看到缺了哪几条；
+          # 是否真的缺，交给最后那个 "Verify denominator" 步骤判定。
+          python3 patcheval-grade/summarize_coverage.py \
+            --artifacts artifacts \
+            --manifest patcheval-coverage/manifest.json \
+            --subset patcheval-coverage/subset58.txt \
+            --out summary/patcheval_coverage_summary.json || true
       - uses: actions/upload-artifact@v4
         with:
           name: patcheval-coverage-summary
@@ -189,14 +157,30 @@ jobs:
             const detail = (data.rows || []).map(r =>
               `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} |`
             ).join('\n');
+            const missing = data.missing || [];
+            const missingBlock = missing.length
+              ? `⚠ **有 ${missing.length} 条 case 完全没有判分结果**（矩阵里在、results 里没有）：`
+                + `分母不完整，本次分数不可直接引用。\n\n`
+                + missing.map(id => `- ${id}`).join('\n') + '\n\n'
+              : `✅ 分母完整：manifest ${data.manifest_total} 条全部有判分结果。\n\n`;
+            const infra = data.infra_reasons || [];
+            const infraBlock = infra.length
+              ? `<details><summary>infra 排除明细（${infra.length} 条，未计入分母）`
+                + `</summary>\n\n| case | reason |\n|---|---|\n`
+                + infra.map(r => `| ${r.case_id} | ${String(r.detail).replace(/\|/g, '\\|')} |`).join('\n')
+                + `\n\n</details>\n\n`
+              : '';
             const body = `${marker}\n\n**全量覆盖集 226 条（Go/JS/Py, CWE 39 类）**\n\n`
               + `graded ${data.graded}/${data.total} · solved **${data.solved} `
               + `(${(data.solve_rate * 100).toFixed(1)}%)** · 排除 infra ${data.excluded_infra} 条\n\n`
+              + missingBlock
               + `其中 58 条均衡子集：solved ${data.subset58.solved}/${data.subset58.graded} `
               + `(${(data.subset58.solve_rate * 100).toFixed(1)}%)`
               + `——与全量同批同判据，可直接对照「子集 vs 全量」的差异。\n\n`
               + `状态分布：${JSON.stringify(data.status_counts)}\n\n`
-              + `> 空补丁（no_patch）计 ${data.no_patch} 条，已计入分母——生成不出补丁就是没修好。\n\n`
+              + `> 空补丁（no_patch）计 ${data.no_patch} 条、apply_failed ${data.apply_failed} 条，`
+              + `全部计入分母——生成不出、贴不上就是没修好。\n\n`
+              + infraBlock
               + `### 分语言\n\n| language | solved/total | rate |\n|---|---|---|\n${rows(data.by_language) || '| - | - | - |'}\n\n`
               + `### 分 CWE\n\n| cwe | solved/total | rate |\n|---|---|---|\n${rows(data.by_cwe) || '| - | - | - |'}\n\n`
               + `<details><summary>逐条结果</summary>\n\n| case | status | solved |\n|---|---|---|\n`
@@ -209,3 +193,16 @@ jobs:
               title: `[PatchEval coverage 226] run ${context.runId}: solved ${data.solved}/${data.graded}`,
               body
             });
+      - name: Verify denominator is complete
+        # issue 已经发出去了，这里才决定这个 job 红不红：缺 case 时宁可报失败，
+        # 也不要让一份「分母悄悄变小」的成绩单看起来像正常结果。
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          data = json.load(open("summary/patcheval_coverage_summary.json", encoding="utf-8"))
+          missing = data.get("missing") or []
+          if missing:
+              print(f"✗ 分母不完整：{len(missing)} 条 case 没有判分结果 -> {missing[:20]}")
+              sys.exit(1)
+          print(f"✓ 分母完整：{data['manifest_total']} 条全部有结果")
+          PY
