@@ -54,11 +54,23 @@ dump_log() {  # 把测试日志尾部落到 results/，artifact 才能带上（�
 
 IMAGE=$(python3 - "$GRADE_DIR/manifest.json" "$CASE" <<'PY'
 import json, sys
-manifest = {m["case_id"]: m for m in json.load(open(sys.argv[1], encoding="utf-8"))}
-print(manifest.get(sys.argv[2], {}).get("image_url") or "")
+path, case = sys.argv[1], sys.argv[2]
+manifest = {m["case_id"]: m for m in json.load(open(path, encoding="utf-8"))}
+if case not in manifest:
+    # 必须把「这个 case 不在本目录的 manifest 里」和「在但缺镜像」分开报：
+    # 前者通常是目录选错了（例如 push 触发时 grade_dir 为空、退回 58 条子集的
+    # patcheval-grade，于是 226 抽样里的部分 case 根本查不到），
+    # 后者才是上游真的没给镜像。混成一句「manifest 无 image_url」会把人引到错的方向。
+    print("MISSING_CASE")
+else:
+    print(manifest[case].get("image_url") or "")
 PY
 )
-[ -z "$IMAGE" ] && { emit infra_error "manifest 无 image_url"; exit 0; }
+if [ "$IMAGE" = "MISSING_CASE" ]; then
+  emit infra_error "$CASE 不在 $GRADE_DIR/manifest.json 里（目录选错？检查 GRADE_DIR_NAME）"
+  exit 0
+fi
+[ -z "$IMAGE" ] && { emit infra_error "manifest 有该 case 但 image_url 为空"; exit 0; }
 [ -f "$GRADE_DIR/tests/$CASE/_run_test.sh" ] || {
   emit infra_error "缺少官方 _run_test.sh"; exit 0; }
 

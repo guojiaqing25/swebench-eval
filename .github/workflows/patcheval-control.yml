@@ -42,6 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      grade_dir: ${{ steps.matrix.outputs.grade_dir }}
     steps:
       - uses: actions/checkout@v4
       - id: matrix
@@ -51,7 +52,13 @@ jobs:
           GRADE_DIR: ${{ github.event.inputs.grade_dir }}
         run: |
           import json, os
-          grade_dir = os.environ.get("GRADE_DIR") or "patcheval-coverage"
+          # 注意：push 触发时 github.event.inputs 全为空，必须在这里兜住默认值，
+          # 并把解析后的目录名通过 outputs.grade_dir 传给下游 job。
+          # 之前 downstream 各步直接用 `${{ github.event.inputs.grade_dir }}`，
+          # push 时它是空串 → control_task.sh 退回 patcheval-grade（58 条子集的清单），
+          # 于是 226 抽样里查不到的 case 全被判「manifest 无 image_url」，
+          # 40 条里 30 条假 infra，把「跑不起来」伪装成了「环境故障」。
+          grade_dir = (os.environ.get("GRADE_DIR") or "").strip() or "patcheval-coverage"
           manifest = json.load(open(f"{grade_dir}/manifest.json", encoding="utf-8"))
           sample = (os.environ.get("SAMPLE") or "40").strip()
           if sample.isdigit() and int(sample) > 0:
@@ -62,7 +69,8 @@ jobs:
                      for m in manifest]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
               stream.write("matrix=" + json.dumps({"include": include}, separators=(",", ":")) + "\n")
-          print(f"control cases: {len(include)}")
+              stream.write(f"grade_dir={grade_dir}\n")
+          print(f"control cases: {len(include)} from {grade_dir}")
 
   control:
     needs: prepare
@@ -80,7 +88,7 @@ jobs:
       - name: Fetch official tests
         env:
           CASE_ID: ${{ matrix.case_id }}
-          GRADE_DIR_NAME: ${{ github.event.inputs.grade_dir }}
+          GRADE_DIR_NAME: ${{ needs.prepare.outputs.grade_dir }}
         # 拉取失败不能吞掉整条记录：让 control_task 照跑，由它判定「缺 _run_test.sh → infra_error」，
         # 这样它一定出现在 excluded_infra 计数里，而不是静默消失。
         continue-on-error: true
@@ -94,7 +102,7 @@ jobs:
       - name: Run tests on UNPATCHED image (must fail)
         env:
           CASE_ID: ${{ matrix.case_id }}
-          GRADE_DIR_NAME: ${{ github.event.inputs.grade_dir }}
+          GRADE_DIR_NAME: ${{ needs.prepare.outputs.grade_dir }}
           # 判据逻辑放在脚本里而不是内联 run：
           # Actions 内联 run 默认 `bash -e`，未打补丁的测试非零退出会让脚本当场中断，
           # 走不到「采集退出码 → 写 result.json」这两步，于是既写不出 no_discrimination
