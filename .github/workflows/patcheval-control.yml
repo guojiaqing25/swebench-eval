@@ -85,6 +85,12 @@ jobs:
         # 这样它一定出现在 excluded_infra 计数里，而不是静默消失。
         continue-on-error: true
         run: bash patcheval-grade/fetch_tests.sh "$CASE_ID"
+      - name: Log in to ghcr (raise anonymous pull limit)
+        # 匿名拉 ghcr 有速率限制，跑 40 条矩阵时很容易被打满，
+        # 表现就是「大批 case 都 docker pull 失败」→ 全部记 infra_error。
+        # 用仓库自带 token 登录只是提升限额，不涉及任何私有包权限。
+        continue-on-error: true
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Run tests on UNPATCHED image (must fail)
         env:
           CASE_ID: ${{ matrix.case_id }}
@@ -104,6 +110,7 @@ jobs:
             patcheval-coverage/results/
             patcheval-grade/results/
             /tmp/ctl_test_${{ matrix.case_id }}.log
+            /tmp/ctl_pull_${{ matrix.case_id }}.log
           retention-days: 14
           if-no-files-found: warn
 
@@ -148,6 +155,12 @@ jobs:
               "no_discrimination": bad,
               "inconclusive_timeout": timeout,
               "status_counts": dict(counts),
+              # infra 的原因必须逐条列出：否则「30 条排除 infra」无法与
+              # 「30 条其实无区分度只是没跑起来」区分开，全面性就是空话。
+              "infra_reasons": [
+                  {"case_id": r["case_id"], "detail": str(r.get("detail") or "")[:200]}
+                  for r in rows if r.get("status") == "infra_error"
+              ],
               "details": [
                   {"case_id": r["case_id"], "status": r.get("status"),
                    "detail": str(r.get("detail") or "")[:200]}
@@ -174,11 +187,13 @@ jobs:
             const detail = (d.details || []).map(r =>
               `| ${r.case_id} | ${r.status} | ${r.detail.replace(/\|/g, '\\|')} |`
             ).join('\n');
+            const badge = (d.excluded_infra || 0)
+              ? `排除 infra **${d.excluded_infra}** 条（原因见下）`
+              : `排除 infra 0 条`;
             const body = `${marker}\n\n**对照组：不打补丁直接跑官方测试（必须失败）**\n\n`
               + `已检查 ${d.checked} 条 · 有区分度 **${d.discriminating}** 条 · `
               + `无区分度 **${d.no_discrimination.length}** 条 · `
-              + `超时（结论不明）${(d.inconclusive_timeout || []).length} 条 · `
-              + `排除 infra ${d.excluded_infra} 条\n\n`
+              + `超时（结论不明）${(d.inconclusive_timeout || []).length} 条 · ${badge}\n\n`
               + `状态分布：${JSON.stringify(d.status_counts)}\n\n`
               + (d.no_discrimination.length
                   ? `⚠ 以下 case 未打补丁也会通过，测试对该漏洞无区分度，评估时须剔除：\n${bad}\n\n`
@@ -186,6 +201,13 @@ jobs:
               + (d.inconclusive_timeout.length
                   ? `⚠ 以下 case 未打补丁即超时，可能是测试依赖外部服务/DBus；`
                     + `不计入有区分度，需人工确认后再决定是否保留：\n${slow}\n\n`
+                  : '')
+              + ((d.infra_reasons || []).length
+                  ? `<details><summary>infra 排除明细（${d.infra_reasons.length} 条，未参与判定）`
+                    + `</summary>\n\n| case | reason |\n|---|---|\n`
+                    + d.infra_reasons.map(r =>
+                        `| ${r.case_id} | ${String(r.detail).replace(/\|/g, '\\|')} |`).join('\n')
+                    + `\n\n</details>\n\n`
                   : '')
               + `<details><summary>逐条对照</summary>\n\n| case | status | detail |\n|---|---|---|\n`
               + `${detail}\n\n</details>\n\n`
