@@ -16,6 +16,12 @@ name: PatchEval test integrity control
 # 只在手动触发或案例集变化时跑（ghcr 拉取较慢，全量 226 条约 20~40 分钟）。
 
 on:
+  push:
+    branches: [main]
+    paths:
+      # 案例集变了就要重验区分度：新案例可能带着一个对漏洞无感的测试
+      - "patcheval-coverage/manifest.json"
+      - ".github/workflows/patcheval-control.yml"
   workflow_dispatch:
     inputs:
       sample:
