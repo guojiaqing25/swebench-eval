@@ -1,14 +1,18 @@
 name: PatchEval summary (report only)
 
-# 只做汇总：下载指定 run 的 grade artifacts 并生成结论，不重跑判分。
-# 用于修正汇总脚本后复用既有结果（artifact 保留 14 天）。
+# 只做汇总：下载指定（或最近一次）PatchEval 判分 run 的 grade artifacts 并生成结论，不重跑判分。
+# 触发方式：push 本文件（自动找最近一次判分 run），或 workflow_dispatch 明确指定 run_id。
 
 on:
+  push:
+    paths:
+      - ".github/workflows/patcheval-summary-only.yml"
   workflow_dispatch:
     inputs:
       run_id:
-        description: '要汇总的 PatchEval 判分 run id'
-        required: true
+        description: '要汇总的 PatchEval 判分 run id（留空=自动找最近一次）'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -20,13 +24,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - id: locate
+        uses: actions/github-script@v7
+        env:
+          INPUT_RUN: ${{ github.event.inputs.run_id }}
+        with:
+          script: |
+            const input = (process.env.INPUT_RUN || '').trim();
+            if (input) {
+              core.setOutput('run_id', input);
+              return;
+            }
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'patcheval-verified-58.yml',
+              per_page: 10,
+            });
+            const done = runs.data.workflow_runs.filter(r => r.conclusion);
+            if (!done.length) throw new Error('找不到已完成的判分 run');
+            core.setOutput('run_id', String(done[0].id));
+            core.info(`使用 run ${done[0].id} (${done[0].conclusion})`);
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           pattern: patcheval-*
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ steps.locate.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Aggregate results
+        env:
+          SOURCE_RUN: ${{ steps.locate.outputs.run_id }}
         run: |
           mkdir -p summary
           python3 - <<'PY'
@@ -51,6 +78,7 @@ jobs:
               bucket["total"] += 1
               bucket["solved"] += 1 if r.get("solved") else 0
           payload = {
+              "source_run": os.environ.get("SOURCE_RUN", ""),
               "total": len(rows), "graded": len(graded), "solved": solved,
               "solve_rate": (solved / len(graded)) if graded else 0.0,
               "status_counts": dict(counts), "by_language": by_lang, "rows": rows,
@@ -58,6 +86,8 @@ jobs:
           json.dump(payload, open("summary/patcheval_summary.json", "w", encoding="utf-8"),
                     ensure_ascii=False, indent=1)
           print(f"artifacts={len(rows)} graded={len(graded)} solved={solved} {dict(counts)}")
+          for r in rows:
+              print(f"  {r.get('case_id')}: {r.get('status')} solved={r.get('solved')}")
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -75,7 +105,7 @@ jobs:
             const detail = (data.rows || []).map(r =>
               `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} |`
             ).join('\n');
-            const body = `${marker}\n\n**汇总来源 run: ${{ inputs.run_id }}**\n\n`
+            const body = `${marker}\n\n**汇总来源 run: ${data.source_run}**\n\n`
               + `**graded ${data.graded}/${data.total} · solved ${data.solved} `
               + `(${(data.solve_rate * 100).toFixed(1)}%)**\n\n`
               + `状态分布：${JSON.stringify(data.status_counts)}\n\n`
