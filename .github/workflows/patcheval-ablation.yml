@@ -1,0 +1,168 @@
+name: PatchEval gate ablation evaluation
+
+# 门禁消融：把「被我们自己的 LLM 复核否决」的候选放出来，用**同一套**上游测试判分。
+#
+# 要回答的问题：
+#   226 条里有相当一部分空补丁，是被 contract_review / adversarial_review /
+#   implementation_review 否决掉的。这些否决到底是拦下了真坏补丁，
+#   还是误杀了本来能通过官方测试的合格修复？
+# 只数「否决了多少条」回答不了——否决本身不是证据。唯一的证据是：
+#   把那些被否决的候选拿去跑官方测试，看它们行不行。
+#
+# 这不是放宽评测：案例集不变、上游测试不变、分母规则不变，唯一的变量是
+#   **被测系统少了一道自我复核**。两组数字必须并列报告，只给一组就是误导。
+#
+# 目录分工：
+#   patcheval-coverage/  主结果（全门禁）
+#   patcheval-ablation/  消融结果（关掉 LLM 复核，静态门禁保留）
+# 两者用同一个 grade_task.sh 判分，判据完全一致。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "patcheval-ablation/patches/**"
+      - "patcheval-ablation/rerun.txt"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: '只跑前 N 条（调试用，留空=全部）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        shell: python
+        env:
+          LIMIT: ${{ github.event.inputs.limit }}
+        run: |
+          import json, os
+          manifest = json.load(open("patcheval-ablation/manifest.json", encoding="utf-8"))
+          limit = (os.environ.get("LIMIT") or "").strip()
+          if limit.isdigit() and int(limit) > 0:
+              manifest = manifest[: int(limit)]
+          include = [{"case_id": m["case_id"], "language": m.get("language", "unknown")}
+                     for m in manifest]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+              stream.write("matrix=" + json.dumps({"include": include}, separators=(",", ":")) + "\n")
+              stream.write(f"planned={len(include)}\n")
+          print(f"ablation cases: {len(include)}")
+
+  grade:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch official tests
+        env:
+          CASE_ID: ${{ matrix.case_id }}
+          GRADE_DIR_NAME: patcheval-ablation
+        # 失败不中断：否则没有 result.json，该 case 在汇总里静默消失
+        continue-on-error: true
+        run: bash patcheval-grade/fetch_tests.sh "$CASE_ID"
+      - name: Log in to ghcr (raise anonymous pull limit)
+        continue-on-error: true
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Grade one CVE
+        env:
+          CASE_ID: ${{ matrix.case_id }}
+          GRADE_DIR_NAME: patcheval-ablation
+          GRADE_SCRIPT: patcheval-grade/grade_task.sh
+        run: bash "$GRADE_SCRIPT" "$CASE_ID"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ablation-${{ matrix.case_id }}
+          path: |
+            patcheval-ablation/results/
+            /tmp/apply_${{ matrix.case_id }}.log
+            /tmp/test_${{ matrix.case_id }}.log
+          retention-days: 14
+          if-no-files-found: warn
+
+  report:
+    needs: grade
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Aggregate results
+        run: |
+          mkdir -p summary
+          # 复用同一个汇总脚本（含分母完整性校验）。消融集不需要 58 条子集口径，
+          # 因此不传 --subset；脚本对缺失的子集文件是容忍的，只会把该段留空。
+          python3 patcheval-grade/summarize_coverage.py \
+            --artifacts artifacts \
+            --manifest patcheval-ablation/manifest.json \
+            --subset patcheval-ablation/subset.txt \
+            --out summary/ablation_summary.json || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ablation-summary
+          path: summary/
+      - name: Publish ablation issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const d = JSON.parse(fs.readFileSync('summary/ablation_summary.json', 'utf8'));
+            const marker = `<!-- patcheval-ablation:${context.runId}:${context.runAttempt} -->`;
+            const rows = (obj) => Object.entries(obj || {})
+              .sort((a, b) => b[1].total - a[1].total)
+              .map(([k, v]) => `| ${k} | ${v.solved}/${v.total} | ${(v.solved / v.total * 100).toFixed(1)}% |`)
+              .join('\n');
+            const missing = d.missing || [];
+            const detail = (d.rows || []).map(r =>
+              `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} |`
+            ).join('\n');
+            const body = `${marker}\n\n**门禁消融：解除 LLM 复核后，被否决的候选能否通过官方测试**\n\n`
+              + `graded ${d.graded}/${d.total} · **solved ${d.solved} `
+              + `(${(d.solve_rate * 100).toFixed(1)}%)** · 排除 infra ${d.excluded_infra} 条\n\n`
+              + (missing.length
+                  ? `⚠ ${missing.length} 条没有判分结果，分母不完整：${missing.slice(0, 10).join(', ')}\n\n`
+                  : `✅ 分母完整：${d.manifest_total} 条全部有结果。\n\n`)
+              + `状态分布：${JSON.stringify(d.status_counts)}\n\n`
+              + `> 判据与主结果完全一致（上游 \`_run_test.sh\` 退出码）。\n`
+              + `> 唯一变量是被测系统少了一道自我复核——案例集、测试、分母规则都没动。\n`
+              + `> **必须与主结果并列引用**：单看这一组会低估门禁的价值，\n`
+              + `> 单看主结果则无法判断门禁是否在误杀。\n\n`
+              + `### 分语言\n\n| language | solved/total | rate |\n|---|---|---|\n${rows(d.by_language) || '| - | - | - |'}\n\n`
+              + `<details><summary>逐条结果</summary>\n\n| case | status | solved |\n|---|---|---|\n${detail}\n\n</details>\n\n`
+              + `[Actions run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`
+              + `/actions/runs/${context.runId})`;
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title: `[PatchEval ablation] 解除 LLM 复核: solved ${d.solved}/${d.graded}`,
+              body
+            });
+      - name: Verify denominator is complete
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("summary/ablation_summary.json", encoding="utf-8"))
+          if d.get("missing"):
+              print(f"✗ 分母不完整：{len(d['missing'])} 条无结果 -> {d['missing'][:20]}")
+              sys.exit(1)
+          print(f"✓ 分母完整：{d['manifest_total']} 条全部有结果")
+          PY
