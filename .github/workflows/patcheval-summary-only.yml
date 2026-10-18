@@ -1,0 +1,89 @@
+name: PatchEval summary (report only)
+
+# 只做汇总：下载指定 run 的 grade artifacts 并生成结论，不重跑判分。
+# 用于修正汇总脚本后复用既有结果（artifact 保留 14 天）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: '要汇总的 PatchEval 判分 run id'
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: patcheval-*
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Aggregate results
+        run: |
+          mkdir -p summary
+          python3 - <<'PY'
+          import glob, json, os, collections
+          rows = []
+          for path in glob.glob("artifacts/**/results/*.json", recursive=True):
+              try:
+                  rows.append(json.load(open(path, encoding="utf-8")))
+              except Exception as exc:
+                  rows.append({"case_id": os.path.basename(path).replace(".json", ""),
+                               "status": "infra_error", "detail": str(exc), "solved": False})
+          rows.sort(key=lambda r: str(r.get("case_id")))
+          counts = collections.Counter(str(r.get("status")) for r in rows)
+          graded = [r for r in rows if r.get("status") != "infra_error"]
+          solved = sum(1 for r in graded if r.get("solved"))
+          manifest = {m["case_id"]: m.get("language", "unknown")
+                      for m in json.load(open("patcheval-grade/manifest.json", encoding="utf-8"))}
+          by_lang = {}
+          for r in graded:
+              lang = manifest.get(str(r.get("case_id")), "unknown")
+              bucket = by_lang.setdefault(lang, {"total": 0, "solved": 0})
+              bucket["total"] += 1
+              bucket["solved"] += 1 if r.get("solved") else 0
+          payload = {
+              "total": len(rows), "graded": len(graded), "solved": solved,
+              "solve_rate": (solved / len(graded)) if graded else 0.0,
+              "status_counts": dict(counts), "by_language": by_lang, "rows": rows,
+          }
+          json.dump(payload, open("summary/patcheval_summary.json", "w", encoding="utf-8"),
+                    ensure_ascii=False, indent=1)
+          print(f"artifacts={len(rows)} graded={len(graded)} solved={solved} {dict(counts)}")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patcheval-summary-final
+          path: summary/
+      - name: Publish summary issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('summary/patcheval_summary.json', 'utf8'));
+            const marker = `<!-- patcheval-summary:${context.runId}:${context.runAttempt} -->`;
+            const langRows = Object.entries(data.by_language || {})
+              .map(([lang, b]) => `| ${lang} | ${b.solved}/${b.total} |`).join('\n');
+            const detail = (data.rows || []).map(r =>
+              `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} |`
+            ).join('\n');
+            const body = `${marker}\n\n**汇总来源 run: ${{ inputs.run_id }}**\n\n`
+              + `**graded ${data.graded}/${data.total} · solved ${data.solved} `
+              + `(${(data.solve_rate * 100).toFixed(1)}%)**\n\n`
+              + `状态分布：${JSON.stringify(data.status_counts)}\n\n`
+              + `| language | solved |\n|---|---|\n${langRows || '| - | - |'}\n\n`
+              + `<details><summary>逐条结果</summary>\n\n| case | status | solved |\n|---|---|---|\n`
+              + `${detail}\n\n</details>`;
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title: `[PatchEval-verified 58] summary: solved ${data.solved}/${data.graded}`,
+              body
+            });
