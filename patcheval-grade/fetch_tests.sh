@@ -9,7 +9,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GRADE_DIR="$ROOT/patcheval-grade"
+# 与 grade_task.sh 保持一致：目录名可由 GRADE_DIR_NAME 覆盖，
+# 让 58 条均衡子集与 226 条全量覆盖集共用同一份拉取逻辑。
+GRADE_DIR="$ROOT/${GRADE_DIR_NAME:-patcheval-grade}"
 BASE="https://raw.githubusercontent.com/livecvebench/LiveCVEBench-Preview/master/tasks/PatchEval-verified"
 PROXY_BASE="https://ghfast.top/https://raw.githubusercontent.com/livecvebench/LiveCVEBench-Preview/master/tasks/PatchEval-verified"
 

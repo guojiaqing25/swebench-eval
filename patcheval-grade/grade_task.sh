@@ -13,7 +13,9 @@ set -uo pipefail
 
 CASE="${1:?需要 CVE-ID}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GRADE_DIR="$ROOT/patcheval-grade"
+# 目录名可用 GRADE_DIR_NAME 覆盖：58 条均衡子集用 patcheval-grade，
+# 全量覆盖集（226 条）用 patcheval-coverage。判分逻辑保持唯一一份，避免两份实现漂移。
+GRADE_DIR="$ROOT/${GRADE_DIR_NAME:-patcheval-grade}"
 PATCH_FILE="$GRADE_DIR/patches/$CASE.diff"
 TESTS_DIR="$GRADE_DIR/tests/$CASE"
 RESULT_DIR="$GRADE_DIR/results"

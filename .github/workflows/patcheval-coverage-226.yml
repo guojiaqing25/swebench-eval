@@ -1,0 +1,195 @@
+name: PatchEval coverage 226 evaluation
+
+# 全量覆盖集判分（PatchEval-verified 226 条，Go/JS/Python，CWE 39 类全覆盖）。
+#
+# 与 patcheval-verified-58.yml 的关系：
+# - 58 条是「均衡子集」，语言无偏但 CWE 分布中等偏移（JSD=0.136），只用作与历史基线
+#   逐条对比的趋势指标；
+# - 本 workflow 跑的是**全量覆盖集**，CWE 分布与上游几乎一致（JSD=0.0002），
+#   是「演绎智能体到底行不行」的主结论口径。
+#
+# 判据与 58 条完全一致：docker pull 官方镜像 → git apply 模型补丁 → 跑上游
+# tests/_run_test.sh → 退出码二值判定。上游测试文件不落仓库，每次现拉。
+#
+# 分档：solved / test_failed / test_timeout / apply_failed / no_patch / infra_error
+# infra_error 不计入分母（镜像拉取失败、测试脚本自身崩溃），其余全部计入。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/patcheval-coverage-226.yml"
+      - "patcheval-coverage/patches/**"
+      - "patcheval-coverage/rerun.txt"
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: '只跑指定 case（逗号分隔，留空=全部）'
+        required: false
+        default: ''
+      limit:
+        description: '只跑前 N 条（调试用，留空=全部）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        shell: python
+        env:
+          ONLY_CASES: ${{ github.event.inputs.cases }}
+          LIMIT: ${{ github.event.inputs.limit }}
+        run: |
+          import json, os
+          manifest = json.load(open("patcheval-coverage/manifest.json", encoding="utf-8"))
+          only = []
+          if os.path.exists("patcheval-coverage/rerun.txt"):
+              raw = open("patcheval-coverage/rerun.txt", encoding="utf-8").read()
+              only = [item.strip() for line in raw.splitlines()
+                      for item in line.split(",") if item.strip()]
+          if not only:
+              only = [x.strip() for x in (os.environ.get("ONLY_CASES") or "").split(",") if x.strip()]
+          if only:
+              manifest = [m for m in manifest if m["case_id"] in only]
+          limit = (os.environ.get("LIMIT") or "").strip()
+          if limit.isdigit() and int(limit) > 0:
+              manifest = manifest[: int(limit)]
+          include = [{"case_id": m["case_id"], "language": m.get("language", "unknown")}
+                     for m in manifest]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+              stream.write("matrix=" + json.dumps({"include": include}, separators=(",", ":")) + "\n")
+          print(f"cases to grade: {len(include)}")
+
+  grade:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch official tests
+        env:
+          CASE_ID: ${{ matrix.case_id }}
+          GRADE_DIR_NAME: patcheval-coverage
+        run: bash patcheval-grade/fetch_tests.sh "$CASE_ID"
+      - name: Grade one CVE
+        env:
+          CASE_ID: ${{ matrix.case_id }}
+          GRADE_DIR_NAME: patcheval-coverage
+          # 脚本本体只有一份（patcheval-grade/grade_task.sh），通过目录名参数复用
+          GRADE_SCRIPT: patcheval-grade/grade_task.sh
+        run: bash "$GRADE_SCRIPT" "$CASE_ID"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: patcheval-cov-${{ matrix.case_id }}
+          path: |
+            patcheval-coverage/results/
+            /tmp/apply_${{ matrix.case_id }}.log
+            /tmp/test_${{ matrix.case_id }}.log
+          retention-days: 14
+          if-no-files-found: warn
+
+  report:
+    needs: grade
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Aggregate results
+        run: |
+          mkdir -p summary
+          python3 - <<'PY'
+          import glob, json, os, collections
+          rows = []
+          for path in glob.glob("artifacts/**/results/*.json", recursive=True):
+              try:
+                  rows.append(json.load(open(path, encoding="utf-8")))
+              except Exception as exc:
+                  rows.append({"case_id": os.path.basename(path), "status": "infra_error",
+                               "detail": str(exc), "solved": False})
+          rows.sort(key=lambda r: str(r.get("case_id")))
+          counts = collections.Counter(str(r.get("status")) for r in rows)
+          graded = [r for r in rows if r.get("status") != "infra_error"]
+          solved = sum(1 for r in graded if r.get("solved"))
+          manifest = json.load(open("patcheval-coverage/manifest.json", encoding="utf-8"))
+          langs = {m["case_id"]: m.get("language", "unknown") for m in manifest}
+          cwes = {m["case_id"]: m.get("cwe_id", "") for m in manifest}
+          by_lang, by_cwe = {}, {}
+          for r in graded:
+              cid = str(r.get("case_id"))
+              for table, key in ((by_lang, langs.get(cid, "unknown")),
+                                 (by_cwe, cwes.get(cid, ""))):
+                  bucket = table.setdefault(key, {"total": 0, "solved": 0})
+                  bucket["total"] += 1
+                  bucket["solved"] += 1 if r.get("solved") else 0
+          payload = {
+              "total": len(rows),
+              "graded": len(graded),
+              "excluded_infra": len(rows) - len(graded),
+              "solved": solved,
+              "solve_rate": (solved / len(graded)) if graded else 0.0,
+              "status_counts": dict(counts),
+              "by_language": by_lang,
+              "by_cwe": dict(sorted(by_cwe.items())),
+              "no_patch": counts.get("no_patch", 0),
+              "rows": rows,
+          }
+          json.dump(payload, open("summary/patcheval_coverage_summary.json", "w", encoding="utf-8"),
+                    ensure_ascii=False, indent=1)
+          print(f"graded={len(graded)} solved={solved} excluded_infra={payload['excluded_infra']}"
+                f" status={dict(counts)}")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patcheval-coverage-summary
+          path: summary/
+      - name: Publish summary issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('summary/patcheval_coverage_summary.json', 'utf8'));
+            const marker = `<!-- patcheval-coverage-226:${context.runId}:${context.runAttempt} -->`;
+            const rows = (obj) => Object.entries(obj || {})
+              .sort((a, b) => b[1].total - a[1].total)
+              .map(([k, v]) => `| ${k} | ${v.solved}/${v.total} | ${(v.solved / v.total * 100).toFixed(1)}% |`)
+              .join('\n');
+            const detail = (data.rows || []).map(r =>
+              `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} |`
+            ).join('\n');
+            const body = `${marker}\n\n**全量覆盖集 226 条（Go/JS/Py, CWE 39 类）**\n\n`
+              + `graded ${data.graded}/${data.total} · solved **${data.solved} `
+              + `(${(data.solve_rate * 100).toFixed(1)}%)** · 排除 infra ${data.excluded_infra} 条\n\n`
+              + `状态分布：${JSON.stringify(data.status_counts)}\n\n`
+              + `> 空补丁（no_patch）计 ${data.no_patch} 条，已计入分母——生成不出补丁就是没修好。\n\n`
+              + `### 分语言\n\n| language | solved/total | rate |\n|---|---|---|\n${rows(data.by_language) || '| - | - | - |'}\n\n`
+              + `### 分 CWE\n\n| cwe | solved/total | rate |\n|---|---|---|\n${rows(data.by_cwe) || '| - | - | - |'}\n\n`
+              + `<details><summary>逐条结果</summary>\n\n| case | status | solved |\n|---|---|---|\n`
+              + `${detail}\n\n</details>\n\n`
+              + `[Actions run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`
+              + `/actions/runs/${context.runId})`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[PatchEval coverage 226] run ${context.runId}: solved ${data.solved}/${data.graded}`,
+              body
+            });

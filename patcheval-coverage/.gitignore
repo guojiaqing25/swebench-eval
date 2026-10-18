@@ -1,0 +1,4 @@
+# 官方测试与判分结果不入库：workflow 现场下载 tests，判分结果走 artifact
+# 这与 patcheval-grade/.gitignore 一致——上游测试文件永远不落我们的仓库。
+tests/
+results/
