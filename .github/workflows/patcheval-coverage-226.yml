@@ -155,7 +155,8 @@ jobs:
               .map(([k, v]) => `| ${k} | ${v.solved}/${v.total} | ${(v.solved / v.total * 100).toFixed(1)}% |`)
               .join('\n');
             const detail = (data.rows || []).map(r =>
-              `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} |`
+              `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} | `
+              + `${String(r.detail || '').replace(/\|/g, '\\|').slice(0, 160)} |`
             ).join('\n');
             const missing = data.missing || [];
             const missingBlock = missing.length
@@ -183,7 +184,7 @@ jobs:
               + infraBlock
               + `### 分语言\n\n| language | solved/total | rate |\n|---|---|---|\n${rows(data.by_language) || '| - | - | - |'}\n\n`
               + `### 分 CWE\n\n| cwe | solved/total | rate |\n|---|---|---|\n${rows(data.by_cwe) || '| - | - | - |'}\n\n`
-              + `<details><summary>逐条结果</summary>\n\n| case | status | solved |\n|---|---|---|\n`
+              + `<details><summary>逐条结果</summary>\n\n| case | status | solved | 说明 |\n|---|---|---|---|\n`
               + `${detail}\n\n</details>\n\n`
               + `[Actions run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`
               + `/actions/runs/${context.runId})`;
