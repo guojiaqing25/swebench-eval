@@ -99,7 +99,7 @@ jobs:
           python3 - <<'PY'
           import glob, json, os, collections
           rows = []
-          for path in glob.glob("artifacts/*/results/*.json"):
+          for path in glob.glob("artifacts/**/results/*.json", recursive=True):
               try:
                   rows.append(json.load(open(path, encoding="utf-8")))
               except Exception as exc:
