@@ -146,6 +146,20 @@ def main() -> int:
     patched = [r for r in graded if r.get("status") != "no_patch"]
     patched_solved = sum(1 for r in patched if r.get("solved"))
 
+    # 失败形态分布：只统计 test_failed / test_timeout。
+    #
+    # grade_task.sh 会在 result.json 里写 fail_kind（从**整份日志**识别的形态），
+    # 而 detail 只是尾部 400 字符的结论区。用 fail_kind 而不是重新解析 detail，
+    # 是因为 detail 的尾部截断会把 "AssertionError" 切成 "tionError"——
+    # 拿它做归因，超过一半的失败只能归到「看不出来」。
+    #
+    # 这一项不参与任何判定，只回答「下一阶段该改哪里」。
+    fail_kinds: dict[str, int] = collections.Counter(
+        str(r.get("fail_kind") or "unspecified")
+        for r in graded
+        if r.get("status") in {"test_failed", "test_timeout"}
+    )
+
     # 分母完整性：manifest 里有、results 里没有的，必须逐条列出。
     seen = {str(r.get("case_id")) for r in rows}
     missing = [str(m["case_id"]) for m in manifest if str(m["case_id"]) not in seen]
@@ -180,6 +194,8 @@ def main() -> int:
         "by_cwe": dict(sorted(bucket(graded, lambda r: cwes.get(str(r.get("case_id")), "")).items())),
         "no_patch": counts.get("no_patch", 0),
         "apply_failed": counts.get("apply_failed", 0),
+        # 失败形态分布（test_failed / test_timeout），按条数降序
+        "fail_kinds": dict(sorted(fail_kinds.items(), key=lambda kv: -kv[1])),
         "missing": missing,
         "infra_reasons": [
             {"case_id": r["case_id"], "detail": str(r.get("detail") or "")[:200]}

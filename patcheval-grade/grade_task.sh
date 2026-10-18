@@ -124,6 +124,70 @@ if [ "$RC" -eq 0 ]; then
 elif [ "$RC" -eq 124 ]; then
   emit test_timeout "测试超过 ${TEST_TIMEOUT}s 未返回（判定为测试未通过，非基础设施故障）" "{\"image_head\":\"$IMAGE_HEAD\"}"
 else
+  # detail 取日志尾部 400 字符：这是给人看的一句话结论，不是诊断材料。
+  # 尾部截断会把首个单词切掉（"AssertionError" 变成 "tionError"），
+  # 所以除 detail 之外再单独抽一组**失败信号**字段，供后续归因使用：
+  #   fail_kind  从整份日志里识别的失败形态（断言/符号未定义/编译/超时…）
+  #   fail_lines 日志中出现失败标记的原始行（去重后最多 5 行，各 200 字符）
+  # 这两个字段只增加可观测性，不参与任何判定：solved 仍然只看退出码。
   DETAIL=$(python3 -c "print(open('$TEST_LOG').read()[-400:].replace(chr(10),' '))")
-  emit test_failed "$DETAIL" "{\"image_head\":\"$IMAGE_HEAD\"}"
+  SIGNALS=$(python3 - "$TEST_LOG" <<'PY'
+import json, re, sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+# 形态识别的顺序就是判断优先级：具体形态在前，泛化形态在后。
+# 先判「期望抛异常却没抛」是因为它和「断言值不符」的改法完全不同：
+# 前者说明修复没阻断危险路径，后者说明改到了错的分支或改过头。
+kinds = [
+    ("no_exception_raised",
+     r"Missing expected exception|did not return expected error|"
+     r"expected fn to throw|to throw an error|should throw|"
+     r"Expected .* to be thrown|assertRaises|not ok \d+ - .*throw"),
+    ("symbol_undefined",
+     r"undefined: \w+|undefined reference|is not a function|has no attribute|"
+     r"NameError:|ReferenceError:|too many arguments in call"),
+    ("compile_error",
+     r"SyntaxError|IndentationError|Unexpected token|ParseError|"
+     r"invalid syntax|unexpected end of|Invalid function name"),
+    ("module_missing",
+     r"Cannot find module|ModuleNotFoundError|ImportError|No module named|"
+     r"ERR_MODULE_NOT_FOUND|DistributionNotFound|cannot find package"),
+    ("build_env",
+     r"go: updates to go\.mod needed|go mod tidy|npm ERR!|error Command failed"),
+    ("assertion_mismatch",
+     r"AssertionError|ERR_ASSERTION|assert.*==|expected .* to (?:be|equal)"),
+    ("over_blocking", r"unexpectedly threw|should not throw|but threw"),
+]
+kind = ""
+for name, pattern in kinds:
+    if re.search(pattern, text, re.I):
+        kind = name
+        break
+# 收集失败标记行：这些行自带上下文，比尾部 400 字符有用得多
+marks = re.compile(
+    r"(FAILED|FAIL:|not ok \d+|AssertionError|ERR_ASSERTION|Traceback|"
+    r"Error:|error:|panic:|undefined:|SyntaxError|Missing expected)", re.I)
+picked, seen = [], set()
+for line in text.splitlines():
+    stripped = line.strip()
+    if not stripped or not marks.search(stripped):
+        continue
+    # 全角去重：日志里同一断言常在 summary 与详情各出现一次
+    key = stripped[:120]
+    if key in seen:
+        continue
+    seen.add(key)
+    picked.append(stripped[:200])
+    if len(picked) >= 5:
+        break
+print(json.dumps({"fail_kind": kind, "fail_lines": picked}, ensure_ascii=False))
+PY
+)
+  emit test_failed "$DETAIL" "$(
+    python3 - "$SIGNALS" "$IMAGE_HEAD" <<'PY'
+import json, sys
+signals = json.loads(sys.argv[1] or "{}")
+signals["image_head"] = sys.argv[2]
+print(json.dumps(signals, ensure_ascii=False))
+PY
+  )"
 fi

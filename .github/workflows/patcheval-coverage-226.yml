@@ -233,6 +233,30 @@ jobs:
               + `(${(data.patched_solve_rate * 100).toFixed(1)}%)`
               + `——整体 ${(data.solve_rate * 100).toFixed(1)}% 与它的差额，`
               + `就是「补丁没生成出来」这一段损失。\n\n`
+              // 失败形态分布：只回答「下一阶段该改哪里」，不参与判定。
+              // 「期望抛异常却没抛」= 修复没阻断危险路径；「断言值不符」= 改错分支或改过头。
+              // 这两种在生成侧对应完全不同的改法，混成一个 test_failed 数字就看不出来。
+              + (Object.keys(data.fail_kinds || {}).length
+                  ? `**失败形态分布**（只统计未通过的 ${(data.fail_kinds
+                      ? Object.values(data.fail_kinds).reduce((a, b) => a + b, 0) : 0)} 条）：`
+                    + `\n\n| 形态 | 条数 | 含义 |\n|---|---|---|\n`
+                    + Object.entries(data.fail_kinds)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([k, v]) => `| ${k} | ${v} | ${
+                          {
+                            no_exception_raised: '期望抛异常却没抛 —— 修复未阻断危险输入',
+                            symbol_undefined: '补丁引用了不存在的符号 —— 补丁构造缺陷',
+                            compile_error: '语法/编译不过 —— 补丁本身不合法',
+                            module_missing: '模块缺失 —— 依赖或环境问题',
+                            build_env: '构建环境阻塞（go.mod/npm）',
+                            assertion_mismatch: '断言值不符 —— 改错分支或改过头',
+                            over_blocking: '正常输入被误拦',
+                            unspecified: '旧结果无此字段（改动前跑的批次）',
+                          }[k] || '-'
+                        } |`)
+                        .join('\n')
+                    + `\n\n`
+                  : '')
               + infraBlock
               + `### 分语言\n\n`
               + `| language | 整体 solved/total | 整体率 | 有补丁 solved/total | 条件率 |\n`

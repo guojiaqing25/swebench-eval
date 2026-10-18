@@ -220,6 +220,44 @@ class SummarizeCoverageTest(unittest.TestCase):
         self.assertEqual(d["patched_total"], 0)
         self.assertEqual(d["patched_solve_rate"], 0.0)
 
+    def test_fail_kinds_are_counted_without_touching_solved(self) -> None:
+        """失败形态分布只做汇总，绝不能影响 solved 判定。
+
+        这个字段的价值在于定位「下一阶段该改哪里」：同样是没修好，
+        「期望抛异常却没抛」和「断言值不符」的改法完全不同。
+        但它一旦被误用作判定依据，等于偷偷改了判据，所以这里同时断言
+        solved 仍然只由退出码决定（status == solved）。
+        """
+        write_result(self.art, "cov-CVE-1", "CVE-1", "solved")
+        for artifact, case_id, kind in (
+            ("cov-CVE-2", "CVE-2", "no_exception_raised"),
+            ("cov-CVE-3", "CVE-3", "no_exception_raised"),
+        ):
+            d_dir = os.path.join(self.art, artifact, "results")
+            os.makedirs(d_dir, exist_ok=True)
+            with open(os.path.join(d_dir, case_id + ".json"), "w", encoding="utf-8") as fh:
+                json.dump({"case_id": case_id, "status": "test_failed",
+                           "solved": False, "fail_kind": kind}, fh)
+        rc, d = self.run_summary()
+        self.assertEqual(rc, 0)
+        self.assertEqual(d["fail_kinds"], {"no_exception_raised": 2})
+        # 判定没被 fail_kind 影响：solved 依然只有 CVE-1
+        self.assertEqual(d["solved"], 1)
+        self.assertEqual(d["solve_rate"], 1 / 3)
+
+    def test_fail_kind_missing_falls_back_to_unspecified(self) -> None:
+        """老结果里没有 fail_kind（改动前跑的那批），不能因此丢掉统计。
+
+        用 unspecified 兜住：这里少算不影响任何判定，但如果直接抛异常，
+        整份历史成绩单就再也算不出来了。
+        """
+        write_result(self.art, "cov-CVE-1", "CVE-1", "solved")
+        write_result(self.art, "cov-CVE-2", "CVE-2", "test_failed")
+        write_result(self.art, "cov-CVE-3", "CVE-3", "no_patch")
+        rc, d = self.run_summary()
+        self.assertEqual(rc, 0)
+        self.assertEqual(d["fail_kinds"], {"unspecified": 1})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
