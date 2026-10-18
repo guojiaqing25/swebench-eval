@@ -1,0 +1,9 @@
+# 消融组补丁放这里：<CVE-ID>.diff
+#
+# 内容 = 被 contract_review / adversarial_review / implementation_review
+# 否决掉的那些候选补丁，原样放进来。判据、案例集、镜像与主结果完全一致，
+# 唯一变量是被测系统少了这三道 LLM 复核。
+#
+# 目录为空时 workflow 会整体跳过（包括不发 issue）：空补丁跑一遍只会得到
+# 「226 条全 no_patch、solved 0/226」，那是配置动作的产物，不是
+# 「门禁没在误杀」的证据。

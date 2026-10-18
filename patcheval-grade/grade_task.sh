@@ -48,7 +48,21 @@ if [ ! -f "$TESTS_DIR/_run_test.sh" ]; then
   exit 0
 fi
 
-IMAGE=$(python3 - "$GRADE_DIR/manifest.json" "$CASE" <<'PY'
+# 镜像清单允许回落到覆盖集那份：消融/对照等实验组与主结果用的是**同一批 226 个
+# 官方镜像**，差别只在补丁。再复制一份 226 条的 manifest 进实验目录，除了制造
+# 两份需要同步的文件之外没有任何收益，而且一旦上游镜像改了、只改了一处，
+# 实验组就会静默地用旧镜像判分。
+MANIFEST="$GRADE_DIR/manifest.json"
+if [ ! -f "$MANIFEST" ] && [ -f "$ROOT/patcheval-coverage/manifest.json" ]; then
+  MANIFEST="$ROOT/patcheval-coverage/manifest.json"
+  echo "[grade] $CASE 无独立 manifest，回落到 patcheval-coverage/manifest.json"
+fi
+if [ ! -f "$MANIFEST" ]; then
+  emit infra_error "找不到 manifest（$GRADE_DIR/manifest.json 与覆盖集清单都不存在）"
+  exit 0
+fi
+
+IMAGE=$(python3 - "$MANIFEST" "$CASE" <<'PY'
 import json, sys
 manifest = {m["case_id"]: m for m in json.load(open(sys.argv[1], encoding="utf-8"))}
 print(manifest.get(sys.argv[2], {}).get("image_url") or "")

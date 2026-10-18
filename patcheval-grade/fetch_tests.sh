@@ -18,7 +18,18 @@ PROXY_BASE="https://ghfast.top/https://raw.githubusercontent.com/livecvebench/Li
 if [ "$#" -gt 0 ]; then
   CASES=("$@")
 else
-  mapfile -t CASES < <(python3 - "$GRADE_DIR/manifest.json" <<'PY'
+  # 与 grade_task.sh 同样的回落：实验组目录（消融等）不单独维护 manifest，
+  # 案例清单直接用覆盖集那份。「不带参数=按清单全量下载」必须仍然可用，
+  # 否则本地想一次性备齐测试文件时会静默地一个都不下。
+  MANIFEST="$GRADE_DIR/manifest.json"
+  if [ ! -f "$MANIFEST" ] && [ -f "$ROOT/patcheval-coverage/manifest.json" ]; then
+    MANIFEST="$ROOT/patcheval-coverage/manifest.json"
+  fi
+  if [ ! -f "$MANIFEST" ]; then
+    echo "[fetch] 找不到 manifest：$GRADE_DIR/manifest.json 与覆盖集清单都不存在" >&2
+    exit 1
+  fi
+  mapfile -t CASES < <(python3 - "$MANIFEST" <<'PY'
 import json, sys
 for item in json.load(open(sys.argv[1], encoding="utf-8")):
     print(item["case_id"])

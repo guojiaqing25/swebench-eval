@@ -1,0 +1,3 @@
+# 官方测试与判分结果不入库：workflow 现场下载 tests，判分结果走 artifact
+tests/
+results/

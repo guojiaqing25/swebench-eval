@@ -16,6 +16,10 @@ name: PatchEval gate ablation evaluation
 #   patcheval-coverage/  主结果（全门禁）
 #   patcheval-ablation/  消融结果（关掉 LLM 复核，静态门禁保留）
 # 两者用同一个 grade_task.sh 判分，判据完全一致。
+#
+# 案例集与镜像清单直接复用 patcheval-coverage/ 那份：消融组和主结果跑的是
+# **同一批 226 个官方镜像**，差别只在补丁。再拷一份 manifest 进来只会多出一份
+# 需要同步的文件——上游镜像一改、漏改这里，消融组就会静默地用旧镜像判分。
 
 on:
   push:
@@ -39,6 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      planned: ${{ steps.matrix.outputs.planned }}
+      has_patches: ${{ steps.matrix.outputs.has_patches }}
+      only: ${{ steps.matrix.outputs.only }}
     steps:
       - uses: actions/checkout@v4
       - id: matrix
@@ -46,20 +53,55 @@ jobs:
         env:
           LIMIT: ${{ github.event.inputs.limit }}
         run: |
-          import json, os
-          manifest = json.load(open("patcheval-ablation/manifest.json", encoding="utf-8"))
+          import glob, json, os
+          # 镜像清单与案例集沿用覆盖集那份（见文件头说明）
+          manifest = json.load(open("patcheval-coverage/manifest.json", encoding="utf-8"))
+          # 矩阵只跑「真有消融补丁」的那些 case。消融集是主结果的子集，
+          # 让其余两百条进矩阵只会各拉一次镜像、判成 no_patch，
+          # 白白占用并发额度并拉长几十分钟——还顺手把 no_patch 数量刷得很难看。
+          patched = {os.path.basename(p).removesuffix(".diff")
+                     for p in glob.glob("patcheval-ablation/patches/*.diff")}
+          manifest = [m for m in manifest if m["case_id"] in patched]
+          # 定向重跑：rerun.txt 非空时只跑其中列出的 case。
+          # paths 里既然把它列成触发条件，就必须真的读它——否则改这个文件会
+          # 触发一次全量判分，和「我只想补跑 6 条」的意图完全相反。
+          only = []
+          if os.path.exists("patcheval-ablation/rerun.txt"):
+              raw = open("patcheval-ablation/rerun.txt", encoding="utf-8").read()
+              only = [item.strip() for line in raw.splitlines()
+                      for item in line.split(",") if item.strip()]
+          if only:
+              missing_patch = [c for c in only if c not in patched]
+              if missing_patch:
+                  # 想重跑却没有补丁 = 会得到 no_patch 的假失败，必须显式喊出来
+                  print(f"⚠ rerun.txt 里 {len(missing_patch)} 条没有消融补丁: {missing_patch[:10]}")
+              manifest = [m for m in manifest if m["case_id"] in only]
           limit = (os.environ.get("LIMIT") or "").strip()
           if limit.isdigit() and int(limit) > 0:
               manifest = manifest[: int(limit)]
           include = [{"case_id": m["case_id"], "language": m.get("language", "unknown")}
                      for m in manifest]
+          # 有没有可判的消融补丁，决定这次运行是否有意义。两种情况都算「没有」：
+          # ① patches/ 为空；② rerun.txt 点名的 case 恰好都没有补丁。
+          # 空矩阵直接跑会得到「226 条全 no_patch、solved 0/226」——那是配置动作的
+          # 产物，不是「门禁没在误杀」的证据，绝不能以 issue 形式混进历次对照。
+          has_patches = bool(patched) and bool(include)
+          if patched and not include:
+              print("⚠ 有补丁，但本次计划里没有一条带补丁的 case —— 跳过。"
+                    "检查 rerun.txt 是否写了没有补丁的 case。")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
               stream.write("matrix=" + json.dumps({"include": include}, separators=(",", ":")) + "\n")
               stream.write(f"planned={len(include)}\n")
-          print(f"ablation cases: {len(include)}")
+              stream.write(f"has_patches={'true' if has_patches else 'false'}\n")
+              # 分母 = 本次计划的那几条（而不是永远 226），否则消融集天然是子集，
+              # 分母校验每次都会报「两百条缺失」而变红。
+              stream.write("only=" + ",".join(m["case_id"] for m in include) + "\n")
+          print(f"ablation cases: {len(include)} (补丁 {len(patched)} 个)")
 
   grade:
     needs: prepare
+    # 没有补丁就没有消融实验：直接跳过，不留污染的 issue
+    if: needs.prepare.outputs.has_patches == 'true'
     strategy:
       fail-fast: false
       max-parallel: 8
@@ -99,23 +141,33 @@ jobs:
           if-no-files-found: warn
 
   report:
-    needs: grade
-    if: always()
+    needs: [prepare, grade]
+    # 没补丁就没有消融实验：拿空 artifacts 生成一份 solved 0/0 的报告毫无意义。
+    # 但 grade 真的失败时仍要发 issue（缺哪几条必须可见），所以带上 always()。
+    if: always() && needs.prepare.outputs.has_patches == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
+        # continue-on-error：一条 artifact 都没有时（整个矩阵都崩在 checkout/拉镜像）
+        # 这个 action 会直接失败，report 就停在第一步——连「226 条全没结果」这份
+        # 最该看到的报告都发不出来。宁可拿空目录继续跑，让汇总把缺失逐条列清。
+        continue-on-error: true
         with:
           path: artifacts
       - name: Aggregate results
+        env:
+          PLANNED_ONLY: ${{ needs.prepare.outputs.only }}
         run: |
           mkdir -p summary
-          # 复用同一个汇总脚本（含分母完整性校验）。消融集不需要 58 条子集口径，
-          # 因此不传 --subset；脚本对缺失的子集文件是容忍的，只会把该段留空。
+          # 复用同一个汇总脚本（含分母完整性校验）。案例集与镜像清单用覆盖集那份，
+          # 与主结果同源；分母按 --only 收到本次计划的那几条——消融集本来就是
+          # 主结果的子集，不收敛口径的话每次都会误报「两百条缺失」。
           python3 patcheval-grade/summarize_coverage.py \
             --artifacts artifacts \
-            --manifest patcheval-ablation/manifest.json \
+            --manifest patcheval-coverage/manifest.json \
             --subset patcheval-ablation/subset.txt \
+            --only "$PLANNED_ONLY" \
             --out summary/ablation_summary.json || true
       - uses: actions/upload-artifact@v4
         with:
@@ -137,6 +189,7 @@ jobs:
               `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} |`
             ).join('\n');
             const body = `${marker}\n\n**门禁消融：解除 LLM 复核后，被否决的候选能否通过官方测试**\n\n`
+              + `本次计划 ${d.manifest_total} 条（= 有消融补丁的 case），`
               + `graded ${d.graded}/${d.total} · **solved ${d.solved} `
               + `(${(d.solve_rate * 100).toFixed(1)}%)** · 排除 infra ${d.excluded_infra} 条\n\n`
               + (missing.length
