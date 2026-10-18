@@ -98,9 +98,15 @@ if ! docker exec "$CID" bash -lc "cd /workspace/$REPO_DIR && git apply -v --whit
 fi
 
 # 2) 跑官方测试（脚本内部会 rm 旧测试文件 + git apply test.patch + 执行真实测试）
+#    单条测试必须设上限：部分任务依赖 D-Bus/网络服务，会永久挂起（如 CVE-2015-1326）
 TEST_LOG=/tmp/test_$CASE.log
-if docker exec "$CID" bash /tests/_run_test.sh > "$TEST_LOG" 2>&1; then
+TEST_TIMEOUT="${TEST_TIMEOUT_SECONDS:-240}"
+timeout "$TEST_TIMEOUT" docker exec "$CID" bash /tests/_run_test.sh > "$TEST_LOG" 2>&1
+RC=$?
+if [ "$RC" -eq 0 ]; then
   emit solved "官方测试通过" "{\"image_head\":\"$IMAGE_HEAD\"}"
+elif [ "$RC" -eq 124 ]; then
+  emit test_timeout "测试超过 ${TEST_TIMEOUT}s 未返回（判定为测试未通过，非基础设施故障）" "{\"image_head\":\"$IMAGE_HEAD\"}"
 else
   DETAIL=$(python3 -c "print(open('$TEST_LOG').read()[-400:].replace(chr(10),' '))")
   emit test_failed "$DETAIL" "{\"image_head\":\"$IMAGE_HEAD\"}"
