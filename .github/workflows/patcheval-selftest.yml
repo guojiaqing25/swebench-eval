@@ -1,0 +1,71 @@
+name: PatchEval grading self-test
+
+# 判分链路自测：只跑 summarize_coverage.py 的单测，不拉镜像、不跑 CVE。
+#
+# 为什么单独一个 workflow：
+# 这个脚本决定「分母」。它算错的形态特别隐蔽——少几条 case 谁都看不出来，
+# 通过率却已经虚高了。而它平时只在 report job 里被执行一次，那里出错的表现
+# 往往只是「数字有点好看」，没人会去追。把单测放在这里，改脚本时立刻见红/见绿。
+#
+# 触发条件刻意包含 workflow 本身与本脚本：这两处最容易在「顺手改一下」时
+# 破坏口径。全量判分那两条线并不监听这些路径（避免用空 patches 跑出假失败），
+# 所以这里不会连带触发昂贵的判分。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "patcheval-grade/summarize_coverage.py"
+      - "patcheval-grade/test_summarize_coverage.py"
+      - ".github/workflows/patcheval-selftest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run summarize_coverage unit tests
+        run: python patcheval-grade/test_summarize_coverage.py
+      - name: Sanity-check the real manifests parse and stay in sync
+        # 单测用的是构造数据；这里再拿仓库里真实的清单做一次冒烟，
+        # 抓「清单本身被改坏了」（空文件、缺 case_id、58 条不是 226 的子集）。
+        run: |
+          python3 - <<'PY'
+          import json, sys
+
+          cov = json.load(open("patcheval-coverage/manifest.json", encoding="utf-8"))
+          sub = json.load(open("patcheval-grade/manifest.json", encoding="utf-8"))
+          problems = []
+
+          for name, items in (("patcheval-coverage", cov), ("patcheval-grade", sub)):
+              if not items:
+                  problems.append(f"{name}/manifest.json 为空")
+              for m in items:
+                  if not m.get("case_id") or not m.get("image_url"):
+                      problems.append(f"{name}: 条目缺 case_id/image_url -> {m}")
+                      break
+
+          cov_ids = {m["case_id"] for m in cov}
+          extra = [m["case_id"] for m in sub if m["case_id"] not in cov_ids]
+          if extra:
+              # 58 条均衡子集必须是 226 覆盖集的子集，否则「子集 vs 全量」
+              # 的对照根本不是同一批题，结论无法互证。
+              problems.append(f"58 条子集里有 {len(extra)} 条不在 226 清单中: {extra[:10]}")
+
+          dupe = len([m["case_id"] for m in cov]) - len(cov_ids)
+          if dupe:
+              problems.append(f"226 清单里有 {dupe} 个重复 case_id")
+
+          if problems:
+              print("\n".join("✗ " + p for p in problems))
+              sys.exit(1)
+          print(f"✓ 清单一致：226 条={len(cov)}，58 条子集={len(sub)}（全部在 226 内）")
+          PY

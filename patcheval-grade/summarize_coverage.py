@@ -66,19 +66,51 @@ def bucket(rows: list[dict], key_of) -> dict[str, dict[str, int]]:
     return table
 
 
+def split_ids(raw: str) -> list[str]:
+    """把 rerun.txt / --only 这类输入解析成 case 列表。
+
+    分隔符同时接受逗号与换行：两种写法在仓库里都出现过（rerun.txt 用逗号，
+    人工补跑时习惯一行一条）。只认逗号会把整份文件当成一个 case。
+    """
+    return [item.strip() for line in (raw or "").splitlines()
+            for item in line.split(",") if item.strip()]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="汇总覆盖集判分结果并校验分母")
     parser.add_argument("--artifacts", default="artifacts")
     parser.add_argument("--manifest", default="patcheval-coverage/manifest.json")
     parser.add_argument("--subset", default="patcheval-coverage/subset58.txt")
     parser.add_argument("--out", default="summary/patcheval_coverage_summary.json")
+    parser.add_argument(
+        "--only",
+        default="",
+        help="只把这些 case 视为本次计划范围（逗号或换行分隔）。"
+             "定向重跑时矩阵只跑其中几条，分母必须跟着缩小，"
+             "否则剩下的两百条会被当成「静默丢失」而误报分母不完整。",
+    )
     args = parser.parse_args()
 
     manifest = json.load(open(args.manifest, encoding="utf-8"))
+    planned_ids = split_ids(args.only)
+    if planned_ids:
+        known = {str(m["case_id"]) for m in manifest}
+        unknown = [c for c in planned_ids if c not in known]
+        if unknown:
+            # 指定的 case 不在清单里，说明 run 配置和清单已经不同源了；
+            # 直接报出来，不要静默地把它算成「已计划但缺失」。
+            print(f"✗ --only 里有 {len(unknown)} 条不在 manifest：{unknown[:10]}")
+            return 1
+        manifest = [m for m in manifest if str(m["case_id"]) in set(planned_ids)]
     langs = {m["case_id"]: m.get("language", "unknown") for m in manifest}
     cwes = {m["case_id"]: m.get("cwe_id", "") for m in manifest}
 
     rows = dedupe(load_rows(args.artifacts))
+    if planned_ids:
+        # artifacts 里可能混着上一次全量跑的产物（同一个 case 两份结果）。
+        # 统计口径必须严格等于「本次计划」，否则定向重跑会混进旧数据。
+        planned = set(planned_ids)
+        rows = [r for r in rows if str(r.get("case_id")) in planned]
     graded = [r for r in rows if r.get("status") != "infra_error"]
     solved = sum(1 for r in graded if r.get("solved"))
     counts = collections.Counter(str(r.get("status")) for r in rows)
@@ -98,7 +130,10 @@ def main() -> int:
     sub_solved = sum(1 for r in sub_rows if r.get("solved"))
 
     payload = {
+        # manifest_total 现在是「本次计划范围」的条数：全量跑=226，定向重跑=计划的那几条。
+        # 分母永远等于计划，而不是永远等于 226——否则定向重跑每次都会红。
         "manifest_total": len(manifest),
+        "scoped": bool(planned_ids),
         "total": len(rows),
         "results_total": len(rows),
         "graded": len(graded),
