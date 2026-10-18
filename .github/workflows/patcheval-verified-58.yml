@@ -68,6 +68,10 @@ jobs:
       - name: Fetch official tests
         env:
           CASE_ID: ${{ matrix.case_id }}
+        # 拉取失败不中断：一旦中断就没有 result.json，该 case 会从汇总里静默消失，
+        # 分母悄悄变小。宁可让 grade_task 判「缺 _run_test.sh → infra_error」，
+        # 至少它出现在排除明细里、带原因、且有人会看到。
+        continue-on-error: true
         run: bash patcheval-grade/fetch_tests.sh "$CASE_ID"
       - name: Grade one CVE
         env:
@@ -96,40 +100,14 @@ jobs:
       - name: Aggregate results
         run: |
           mkdir -p summary
-          python3 - <<'PY'
-          import glob, json, os, collections
-          rows = []
-          for path in glob.glob("artifacts/**/results/*.json", recursive=True):
-              try:
-                  rows.append(json.load(open(path, encoding="utf-8")))
-              except Exception as exc:
-                  rows.append({"case_id": os.path.basename(path), "status": "infra_error",
-                               "detail": str(exc), "solved": False})
-          rows.sort(key=lambda r: str(r.get("case_id")))
-          counts = collections.Counter(str(r.get("status")) for r in rows)
-          graded = [r for r in rows if r.get("status") != "infra_error"]
-          solved = sum(1 for r in graded if r.get("solved"))
-          by_lang = {}
-          manifest = {m["case_id"]: m.get("language", "unknown")
-                      for m in json.load(open("patcheval-grade/manifest.json", encoding="utf-8"))}
-          for r in graded:
-              lang = manifest.get(str(r.get("case_id")), "unknown")
-              bucket = by_lang.setdefault(lang, {"total": 0, "solved": 0})
-              bucket["total"] += 1
-              bucket["solved"] += 1 if r.get("solved") else 0
-          payload = {
-              "total": len(rows),
-              "graded": len(graded),
-              "solved": solved,
-              "solve_rate": (solved / len(graded)) if graded else 0.0,
-              "status_counts": dict(counts),
-              "by_language": by_lang,
-              "rows": rows,
-          }
-          json.dump(payload, open("summary/patcheval_summary.json", "w", encoding="utf-8"),
-                    ensure_ascii=False, indent=1)
-          print(f"graded={len(graded)} solved={solved} status={dict(counts)}")
-          PY
+          # 复用覆盖集的汇总脚本：它带分母完整性校验（manifest 里有、results 里没有的
+          # case 全部列出来）。58 条这条线此前没有这道校验，某个 job 崩掉时
+          # 该 case 会静默消失、分母变小，而报告上完全看不出来。
+          python3 patcheval-grade/summarize_coverage.py \
+            --artifacts artifacts \
+            --manifest patcheval-grade/manifest.json \
+            --subset patcheval-grade/none.txt \
+            --out summary/patcheval_summary.json || true
       - uses: actions/upload-artifact@v4
         with:
           name: patcheval-summary
@@ -148,6 +126,10 @@ jobs:
             ).join('\n');
             const body = `${marker}\n\n**graded ${data.graded}/${data.total} · solved ${data.solved} `
               + `(${(data.solve_rate * 100).toFixed(1)}%)**\n\n`
+              + ((data.missing || []).length
+                  ? `⚠ **${data.missing.length} 条 case 没有任何判分结果**（分母不完整）：`
+                    + `${data.missing.slice(0, 10).join(', ')}\n\n`
+                  : `✅ 分母完整：${data.manifest_total} 条全部有结果。\n\n`)
               + `状态分布：${JSON.stringify(data.status_counts)}\n\n`
               + `| language | solved |\n|---|---|\n${langRows || '| - | - |'}\n\n`
               + `<details><summary>逐条结果</summary>\n\n| case | status | solved |\n|---|---|---|\n`
