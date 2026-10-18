@@ -141,6 +141,14 @@ jobs:
                   bucket = table.setdefault(key, {"total": 0, "solved": 0})
                   bucket["total"] += 1
                   bucket["solved"] += 1 if r.get("solved") else 0
+          # 58 条均衡子集是 226 条的子集，同一次判分里顺带给出它的分数：
+          # 「均衡子集 vs 全量」并列才有意义——单看一个数字分不清是能力变了还是题目变了。
+          subset58 = set()
+          if os.path.exists("patcheval-coverage/subset58.txt"):
+              raw = open("patcheval-coverage/subset58.txt", encoding="utf-8").read()
+              subset58 = {line.strip() for line in raw.splitlines() if line.strip()}
+          sub_rows = [r for r in graded if str(r.get("case_id")) in subset58]
+          sub_solved = sum(1 for r in sub_rows if r.get("solved"))
           payload = {
               "total": len(rows),
               "graded": len(graded),
@@ -151,6 +159,11 @@ jobs:
               "by_language": by_lang,
               "by_cwe": dict(sorted(by_cwe.items())),
               "no_patch": counts.get("no_patch", 0),
+              "subset58": {
+                  "graded": len(sub_rows),
+                  "solved": sub_solved,
+                  "solve_rate": (sub_solved / len(sub_rows)) if sub_rows else 0.0,
+              },
               "rows": rows,
           }
           json.dump(payload, open("summary/patcheval_coverage_summary.json", "w", encoding="utf-8"),
@@ -179,6 +192,9 @@ jobs:
             const body = `${marker}\n\n**全量覆盖集 226 条（Go/JS/Py, CWE 39 类）**\n\n`
               + `graded ${data.graded}/${data.total} · solved **${data.solved} `
               + `(${(data.solve_rate * 100).toFixed(1)}%)** · 排除 infra ${data.excluded_infra} 条\n\n`
+              + `其中 58 条均衡子集：solved ${data.subset58.solved}/${data.subset58.graded} `
+              + `(${(data.subset58.solve_rate * 100).toFixed(1)}%)`
+              + `——与全量同批同判据，可直接对照「子集 vs 全量」的差异。\n\n`
               + `状态分布：${JSON.stringify(data.status_counts)}\n\n`
               + `> 空补丁（no_patch）计 ${data.no_patch} 条，已计入分母——生成不出补丁就是没修好。\n\n`
               + `### 分语言\n\n| language | solved/total | rate |\n|---|---|---|\n${rows(data.by_language) || '| - | - | - |'}\n\n`
