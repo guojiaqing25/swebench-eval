@@ -1,0 +1,466 @@
+[
+  {
+    "case_id": "CVE-2018-12976",
+    "language": "go",
+    "cwe_id": "CWE-22",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2018-12976",
+    "filename": "gosrc/gosrc.go",
+    "repo": "golang/gddo"
+  },
+  {
+    "case_id": "CVE-2019-19499",
+    "language": "go",
+    "cwe_id": "CWE-89",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2019-19499",
+    "filename": "pkg/tsdb/mysql/mysql.go",
+    "repo": "grafana/grafana"
+  },
+  {
+    "case_id": "CVE-2020-11053",
+    "language": "go",
+    "cwe_id": "CWE-601",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2020-11053",
+    "filename": "oauthproxy.go",
+    "repo": "oauth2-proxy/oauth2-proxy"
+  },
+  {
+    "case_id": "CVE-2020-15233",
+    "language": "go",
+    "cwe_id": "CWE-601",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2020-15233",
+    "filename": "authorize_helper.go",
+    "repo": "ory/fosite"
+  },
+  {
+    "case_id": "CVE-2020-26294",
+    "language": "go",
+    "cwe_id": "CWE-94",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2020-26294",
+    "filename": "template/native/render.go",
+    "repo": "go-vela/compiler"
+  },
+  {
+    "case_id": "CVE-2020-29529",
+    "language": "go",
+    "cwe_id": "CWE-73",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2020-29529",
+    "filename": "slug.go",
+    "repo": "hashicorp/go-slug"
+  },
+  {
+    "case_id": "CVE-2020-4037",
+    "language": "go",
+    "cwe_id": "CWE-601",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2020-4037",
+    "filename": "oauthproxy.go",
+    "repo": "oauth2-proxy/oauth2-proxy"
+  },
+  {
+    "case_id": "CVE-2020-8559",
+    "language": "go",
+    "cwe_id": "CWE-601",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2020-8559",
+    "filename": "staging/src/k8s.io/apimachinery/pkg/util/proxy/upgradeaware.go",
+    "repo": "kubernetes/kubernetes"
+  },
+  {
+    "case_id": "CVE-2021-21291",
+    "language": "go",
+    "cwe_id": "CWE-601",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-21291",
+    "filename": "oauthproxy.go",
+    "repo": "oauth2-proxy/oauth2-proxy"
+  },
+  {
+    "case_id": "CVE-2021-21411",
+    "language": "go",
+    "cwe_id": "CWE-863",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-21411",
+    "filename": "providers/gitlab.go",
+    "repo": "oauth2-proxy/oauth2-proxy"
+  },
+  {
+    "case_id": "CVE-2021-21432",
+    "language": "go",
+    "cwe_id": "CWE-862",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-21432",
+    "filename": "source/github/authentication.go",
+    "repo": "go-vela/server"
+  },
+  {
+    "case_id": "CVE-2021-22538",
+    "language": "go",
+    "cwe_id": "CWE-276",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-22538",
+    "filename": "pkg/rbac/rbac.go",
+    "repo": "google/exposure-notifications-verification-server"
+  },
+  {
+    "case_id": "CVE-2021-26921",
+    "language": "go",
+    "cwe_id": "CWE-613",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-26921",
+    "filename": "util/session/sessionmanager.go",
+    "repo": "argoproj/argo-cd"
+  },
+  {
+    "case_id": "CVE-2021-29417",
+    "language": "go",
+    "cwe_id": "CWE-22",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-29417",
+    "filename": "internal/pkg/gitjacker/retriever.go",
+    "repo": "liamg/gitjacker"
+  },
+  {
+    "case_id": "CVE-2021-3155",
+    "language": "go",
+    "cwe_id": "CWE-276",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-3155",
+    "filename": "cmd/snap/cmd_run.go",
+    "repo": "snapcore/snapd"
+  },
+  {
+    "case_id": "CVE-2021-32701",
+    "language": "go",
+    "cwe_id": "CWE-863",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-32701",
+    "filename": "pipeline/authn/authenticator_oauth2_introspection.go",
+    "repo": "ory/oathkeeper"
+  },
+  {
+    "case_id": "CVE-2021-32783",
+    "language": "go",
+    "cwe_id": "CWE-610",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-32783",
+    "filename": "internal/dag/accessors.go",
+    "repo": "projectcontour/contour"
+  },
+  {
+    "case_id": "CVE-2021-36157",
+    "language": "go",
+    "cwe_id": "CWE-73",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-36157",
+    "filename": "pkg/tenant/resolver.go",
+    "repo": "cortexproject/cortex"
+  },
+  {
+    "case_id": "CVE-2021-41803",
+    "language": "go",
+    "cwe_id": "CWE-862",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-41803",
+    "filename": "agent/consul/auto_config_endpoint.go",
+    "repo": "hashicorp/consul"
+  },
+  {
+    "case_id": "CVE-2021-43798",
+    "language": "go",
+    "cwe_id": "CWE-73",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-43798",
+    "filename": "pkg/api/plugins.go",
+    "repo": "grafana/grafana"
+  },
+  {
+    "case_id": "CVE-2015-3295",
+    "language": "javascript",
+    "cwe_id": "CWE-284",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2015-3295",
+    "filename": "lib/index.js",
+    "repo": "markdown-it/markdown-it"
+  },
+  {
+    "case_id": "CVE-2016-1000232",
+    "language": "javascript",
+    "cwe_id": "CWE-20",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2016-1000232",
+    "filename": "lib/cookie.js",
+    "repo": "salesforce/tough-cookie"
+  },
+  {
+    "case_id": "CVE-2016-10548",
+    "language": "javascript",
+    "cwe_id": "CWE-94",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2016-10548",
+    "filename": "index.js",
+    "repo": "MoOx/reduce-css-calc"
+  },
+  {
+    "case_id": "CVE-2017-1000189",
+    "language": "javascript",
+    "cwe_id": "CWE-20",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2017-1000189",
+    "filename": "lib/ejs.js",
+    "repo": "mde/ejs"
+  },
+  {
+    "case_id": "CVE-2017-1001003",
+    "language": "javascript",
+    "cwe_id": "CWE-20",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2017-1001003",
+    "filename": "lib/expression/node/ObjectNode.js",
+    "repo": "josdejong/mathjs"
+  },
+  {
+    "case_id": "CVE-2017-1001004",
+    "language": "javascript",
+    "cwe_id": "CWE-20",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2017-1001004",
+    "filename": "typed-function.js",
+    "repo": "josdejong/typed-function"
+  },
+  {
+    "case_id": "CVE-2017-16025",
+    "language": "javascript",
+    "cwe_id": "CWE-287",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2017-16025",
+    "filename": "lib/socket.js",
+    "repo": "hapijs/nes"
+  },
+  {
+    "case_id": "CVE-2017-16042",
+    "language": "javascript",
+    "cwe_id": "CWE-94",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2017-16042",
+    "filename": "lib/growl.js",
+    "repo": "tj/node-growl"
+  },
+  {
+    "case_id": "CVE-2017-16083",
+    "language": "javascript",
+    "cwe_id": "CWE-73",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2017-16083",
+    "filename": "lib/router.js",
+    "repo": "sandy98/node-simple-router"
+  },
+  {
+    "case_id": "CVE-2017-16100",
+    "language": "javascript",
+    "cwe_id": "CWE-94",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2017-16100",
+    "filename": "lib/dns-sync.js",
+    "repo": "skoranga/node-dns-sync"
+  },
+  {
+    "case_id": "CVE-2017-16198",
+    "language": "javascript",
+    "cwe_id": "CWE-22",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2017-16198",
+    "filename": "index.js",
+    "repo": "hardog/ritp"
+  },
+  {
+    "case_id": "CVE-2018-16482",
+    "language": "javascript",
+    "cwe_id": "CWE-22",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2018-16482",
+    "filename": "lib/staticFileHandler.js",
+    "repo": "tjchaplin/mcstatic"
+  },
+  {
+    "case_id": "CVE-2018-20834",
+    "language": "javascript",
+    "cwe_id": "CWE-59",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2018-20834",
+    "filename": "lib/parse.js",
+    "repo": "npm/node-tar"
+  },
+  {
+    "case_id": "CVE-2018-3733",
+    "language": "javascript",
+    "cwe_id": "CWE-73",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2018-3733",
+    "filename": "crud-file-server.js",
+    "repo": "omphalos/crud-file-server"
+  },
+  {
+    "case_id": "CVE-2018-3734",
+    "language": "javascript",
+    "cwe_id": "CWE-22",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2018-3734",
+    "filename": "index.js",
+    "repo": "jmjuanes/stattic"
+  },
+  {
+    "case_id": "CVE-2018-3772",
+    "language": "javascript",
+    "cwe_id": "CWE-94",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2018-3772",
+    "filename": "index.js",
+    "repo": "vvo/node-whereis"
+  },
+  {
+    "case_id": "CVE-2018-3785",
+    "language": "javascript",
+    "cwe_id": "CWE-78",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2018-3785",
+    "filename": "index.js",
+    "repo": "stevemao/git-dummy-commit"
+  },
+  {
+    "case_id": "CVE-2019-10792",
+    "language": "javascript",
+    "cwe_id": "CWE-74",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2019-10792",
+    "filename": "src/index.js",
+    "repo": "diegohaz/bodymen"
+  },
+  {
+    "case_id": "CVE-2015-1326",
+    "language": "python",
+    "cwe_id": "CWE-20",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2015-1326",
+    "filename": "dbusmock/mockobject.py",
+    "repo": "martinpitt/python-dbusmock"
+  },
+  {
+    "case_id": "CVE-2015-8213",
+    "language": "python",
+    "cwe_id": "CWE-200",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2015-8213",
+    "filename": "django/utils/formats.py",
+    "repo": "django/django"
+  },
+  {
+    "case_id": "CVE-2017-0360",
+    "language": "python",
+    "cwe_id": "CWE-285",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2017-0360",
+    "filename": "trytond/tools/misc.py",
+    "repo": "tryton/trytond"
+  },
+  {
+    "case_id": "CVE-2017-7233",
+    "language": "python",
+    "cwe_id": "CWE-601",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2017-7233",
+    "filename": "django/utils/http.py",
+    "repo": "django/django"
+  },
+  {
+    "case_id": "CVE-2018-14574",
+    "language": "python",
+    "cwe_id": "CWE-601",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2018-14574",
+    "filename": "django/middleware/common.py",
+    "repo": "django/django"
+  },
+  {
+    "case_id": "CVE-2018-18074",
+    "language": "python",
+    "cwe_id": "CWE-522",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2018-18074",
+    "filename": "requests/sessions.py",
+    "repo": "requests/requests"
+  },
+  {
+    "case_id": "CVE-2018-7753",
+    "language": "python",
+    "cwe_id": "CWE-20",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2018-7753",
+    "filename": "bleach/sanitizer.py",
+    "repo": "mozilla/bleach"
+  },
+  {
+    "case_id": "CVE-2019-10856",
+    "language": "python",
+    "cwe_id": "CWE-601",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2019-10856",
+    "filename": "notebook/auth/login.py",
+    "repo": "jupyter/notebook"
+  },
+  {
+    "case_id": "CVE-2019-16789",
+    "language": "python",
+    "cwe_id": "CWE-444",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2019-16789",
+    "filename": "waitress/parser.py",
+    "repo": "Pylons/waitress"
+  },
+  {
+    "case_id": "CVE-2019-7539",
+    "language": "python",
+    "cwe_id": "CWE-94",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2019-7539",
+    "filename": "ipycache.py",
+    "repo": "adi928/ipycache"
+  },
+  {
+    "case_id": "CVE-2020-10691",
+    "language": "python",
+    "cwe_id": "CWE-73",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2020-10691",
+    "filename": "lib/ansible/galaxy/collection.py",
+    "repo": "ansible/ansible"
+  },
+  {
+    "case_id": "CVE-2020-15278",
+    "language": "python",
+    "cwe_id": "CWE-285",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2020-15278",
+    "filename": "redbot/cogs/mod/kickban.py",
+    "repo": "Cog-Creators/Red-DiscordBot"
+  },
+  {
+    "case_id": "CVE-2020-25459",
+    "language": "python",
+    "cwe_id": "CWE-668",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2020-25459",
+    "filename": "federatedml/tree/hetero/hetero_decision_tree_guest.py",
+    "repo": "FederatedAI/FATE"
+  },
+  {
+    "case_id": "CVE-2020-26215",
+    "language": "python",
+    "cwe_id": "CWE-601",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2020-26215",
+    "filename": "notebook/base/handlers.py",
+    "repo": "jupyter/notebook"
+  },
+  {
+    "case_id": "CVE-2021-21354",
+    "language": "python",
+    "cwe_id": "CWE-601",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-21354",
+    "filename": "pollbot/middlewares.py",
+    "repo": "mozilla/PollBot"
+  },
+  {
+    "case_id": "CVE-2021-21360",
+    "language": "python",
+    "cwe_id": "CWE-200",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-21360",
+    "filename": "src/Products/GenericSetup/context.py",
+    "repo": "zopefoundation/Products.GenericSetup"
+  },
+  {
+    "case_id": "CVE-2021-23727",
+    "language": "python",
+    "cwe_id": "CWE-94",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-23727",
+    "filename": "celery/backends/base.py",
+    "repo": "celery/celery"
+  },
+  {
+    "case_id": "CVE-2021-31542",
+    "language": "python",
+    "cwe_id": "CWE-73",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-31542",
+    "filename": "django/core/files/storage.py",
+    "repo": "django/django"
+  },
+  {
+    "case_id": "CVE-2021-3281",
+    "language": "python",
+    "cwe_id": "CWE-73",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-3281",
+    "filename": "django/utils/archive.py",
+    "repo": "django/django"
+  },
+  {
+    "case_id": "CVE-2021-33203",
+    "language": "python",
+    "cwe_id": "CWE-73",
+    "image_url": "ghcr.io/patcheval-cve/patcheval-cve:cve-2021-33203",
+    "filename": "django/contrib/admindocs/views.py",
+    "repo": "django/django"
+  }
+]
