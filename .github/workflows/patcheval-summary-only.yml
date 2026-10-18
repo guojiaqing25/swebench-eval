@@ -102,15 +102,16 @@ jobs:
             const marker = `<!-- patcheval-summary:${context.runId}:${context.runAttempt} -->`;
             const langRows = Object.entries(data.by_language || {})
               .map(([lang, b]) => `| ${lang} | ${b.solved}/${b.total} |`).join('\n');
-            const detail = (data.rows || []).map(r =>
-              `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} |`
-            ).join('\n');
+            const detail = (data.rows || []).map(r => {
+              const why = String(r.detail || '').replace(/\|/g, '\\|').replace(/\s+/g, ' ').slice(0, 110);
+              return `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} | ${why} |`;
+            }).join('\n');
             const body = `${marker}\n\n**汇总来源 run: ${data.source_run}**\n\n`
               + `**graded ${data.graded}/${data.total} · solved ${data.solved} `
               + `(${(data.solve_rate * 100).toFixed(1)}%)**\n\n`
               + `状态分布：${JSON.stringify(data.status_counts)}\n\n`
               + `| language | solved |\n|---|---|\n${langRows || '| - | - |'}\n\n`
-              + `<details><summary>逐条结果</summary>\n\n| case | status | solved |\n|---|---|---|\n`
+              + `<details><summary>逐条结果</summary>\n\n| case | status | solved | detail |\n|---|---|---|---|\n`
               + `${detail}\n\n</details>`;
             await github.rest.issues.create({
               owner: context.repo.owner, repo: context.repo.repo,
