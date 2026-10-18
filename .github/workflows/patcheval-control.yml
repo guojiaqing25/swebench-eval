@@ -81,41 +81,20 @@ jobs:
         env:
           CASE_ID: ${{ matrix.case_id }}
           GRADE_DIR_NAME: ${{ github.event.inputs.grade_dir }}
+        # 拉取失败不能吞掉整条记录：让 control_task 照跑，由它判定「缺 _run_test.sh → infra_error」，
+        # 这样它一定出现在 excluded_infra 计数里，而不是静默消失。
+        continue-on-error: true
         run: bash patcheval-grade/fetch_tests.sh "$CASE_ID"
       - name: Run tests on UNPATCHED image (must fail)
         env:
           CASE_ID: ${{ matrix.case_id }}
           GRADE_DIR_NAME: ${{ github.event.inputs.grade_dir }}
-        run: |
-          set -uo pipefail
-          GRADE_DIR="${GRADE_DIR_NAME:-patcheval-grade}"
-          CASE="$CASE_ID"
-          mkdir -p "$GRADE_DIR/results"
-          IMAGE=$(python3 -c 'import json,sys; m={x["case_id"]:x for x in json.load(open(sys.argv[1],encoding="utf-8"))}; print(m.get(sys.argv[2],{}).get("image_url") or "")' "$GRADE_DIR/manifest.json" "$CASE")
-          emit() {
-            python3 -c 'import json,sys; case,status,detail,out=sys.argv[1:5]; json.dump({"case_id":case,"status":status,"detail":detail,"solved":status=="test_failed"}, open(out,"w",encoding="utf-8"), ensure_ascii=False, indent=1); print(f"[control] {case} {status} {detail}")' "$CASE" "$1" "$2" "$GRADE_DIR/results/$CASE.json"
-          }
-          if [ -z "$IMAGE" ]; then emit infra_error "manifest 无 image_url"; exit 0; fi
-          if [ ! -f "$GRADE_DIR/tests/$CASE/_run_test.sh" ]; then
-            emit infra_error "缺少官方 _run_test.sh"; exit 0
-          fi
-          if ! docker pull "$IMAGE" > /tmp/ctl_pull_$CASE.log 2>&1; then
-            emit infra_error "docker pull 失败"; exit 0
-          fi
-          CID=$(docker run -d "$IMAGE" sleep infinity) || { emit infra_error "容器启动失败"; exit 0; }
-          trap 'docker rm -f "$CID" >/dev/null 2>&1 || true' EXIT
-          docker cp "$GRADE_DIR/tests/$CASE/." "$CID:/tests" >/dev/null 2>&1 || {
-            emit infra_error "测试拷贝失败"; exit 0; }
-          # 注意：这里**故意不应用任何补丁**
-          timeout 240 docker exec "$CID" bash /tests/_run_test.sh > /tmp/ctl_test_$CASE.log 2>&1
-          RC=$?
-          if [ "$RC" -eq 0 ]; then
-            emit no_discrimination "未打补丁但官方测试通过：该 case 测试无区分度，应从评估集剔除"
-          elif [ "$RC" -eq 124 ]; then
-            emit test_timeout "未打补丁即超时（视为测试失败，对照成立但不计入有效样本）"
-          else
-            emit test_failed "未打补丁测试失败，对照成立（测试有区分度）"
-          fi
+          # 判据逻辑放在脚本里而不是内联 run：
+          # Actions 内联 run 默认 `bash -e`，未打补丁的测试非零退出会让脚本当场中断，
+          # 走不到「采集退出码 → 写 result.json」这两步，于是既写不出 no_discrimination
+          # 也写不出 test_failed，整个对照组等于没跑。
+          GRADE_SCRIPT: patcheval-grade/control_task.sh
+        run: bash "$GRADE_SCRIPT" "$CASE_ID"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -124,6 +103,7 @@ jobs:
           path: |
             patcheval-coverage/results/
             patcheval-grade/results/
+            /tmp/ctl_test_${{ matrix.case_id }}.log
           retention-days: 14
           if-no-files-found: warn
 
@@ -147,20 +127,36 @@ jobs:
                   rows.append(json.load(open(path, encoding="utf-8")))
               except Exception:
                   continue
+          # 一次运行里同一 case 可能出现在多个 artifact 目录（patcheval-coverage/ 与
+          # patcheval-grade/ 都被收集），按 case_id 去重，否则分母会被重复计数放大。
+          unique = {}
+          for row in rows:
+              unique[str(row.get("case_id"))] = row
+          rows = list(unique.values())
           valid = [r for r in rows if r.get("status") != "infra_error"]
-          bad = [r["case_id"] for r in valid if r.get("status") == "no_discrimination"]
+          bad = sorted(r["case_id"] for r in valid if r.get("status") == "no_discrimination")
+          # 超时既不能证明有区分度（可能是测试依赖外部服务挂了），也不是「通过」，
+          # 单独列成 inconclusive，不进 discriminating 分子。
+          timeout = sorted(r["case_id"] for r in valid if r.get("status") == "test_timeout")
+          discriminating = sorted(r["case_id"] for r in valid if r.get("status") == "test_failed")
           counts = collections.Counter(str(r.get("status")) for r in valid)
           payload = {
               "checked": len(valid),
               "excluded_infra": len(rows) - len(valid),
-              "discriminating": sum(1 for r in valid
-                                    if r.get("status") in {"test_failed", "test_timeout"}),
+              "discriminating": len(discriminating),
+              "discriminating_cases": discriminating,
               "no_discrimination": bad,
+              "inconclusive_timeout": timeout,
               "status_counts": dict(counts),
+              "details": [
+                  {"case_id": r["case_id"], "status": r.get("status"),
+                   "detail": str(r.get("detail") or "")[:200]}
+                  for r in sorted(valid, key=lambda x: str(x["case_id"]))
+              ],
           }
           json.dump(payload, open("summary/control_summary.json", "w", encoding="utf-8"),
                     ensure_ascii=False, indent=1)
-          print(payload)
+          print({k: v for k, v in payload.items() if k != "details"})
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -174,14 +170,26 @@ jobs:
             const d = JSON.parse(fs.readFileSync('summary/control_summary.json', 'utf8'));
             const marker = `<!-- patcheval-control:${context.runId}:${context.runAttempt} -->`;
             const bad = (d.no_discrimination || []).map(id => `- ${id}`).join('\n');
+            const slow = (d.inconclusive_timeout || []).map(id => `- ${id}`).join('\n');
+            const detail = (d.details || []).map(r =>
+              `| ${r.case_id} | ${r.status} | ${r.detail.replace(/\|/g, '\\|')} |`
+            ).join('\n');
             const body = `${marker}\n\n**对照组：不打补丁直接跑官方测试（必须失败）**\n\n`
               + `已检查 ${d.checked} 条 · 有区分度 **${d.discriminating}** 条 · `
-              + `无区分度 **${d.no_discrimination.length}** 条 · 排除 infra ${d.excluded_infra} 条\n\n`
+              + `无区分度 **${d.no_discrimination.length}** 条 · `
+              + `超时（结论不明）${(d.inconclusive_timeout || []).length} 条 · `
+              + `排除 infra ${d.excluded_infra} 条\n\n`
               + `状态分布：${JSON.stringify(d.status_counts)}\n\n`
               + (d.no_discrimination.length
-                  ? `⚠ 以下 case 未打补丁也会通过，测试对该漏洞无区分度，评估时须剔除：\n${bad}\n`
-                  : `✅ 全部案例在未修复状态下都失败——说明官方测试确实在测漏洞，判据没有被放松。\n`)
-              + `\n[Actions run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`
+                  ? `⚠ 以下 case 未打补丁也会通过，测试对该漏洞无区分度，评估时须剔除：\n${bad}\n\n`
+                  : `✅ 没有出现「未修复也能通过」的案例——官方测试确实在测漏洞，判据没有被放松。\n\n`)
+              + (d.inconclusive_timeout.length
+                  ? `⚠ 以下 case 未打补丁即超时，可能是测试依赖外部服务/DBus；`
+                    + `不计入有区分度，需人工确认后再决定是否保留：\n${slow}\n\n`
+                  : '')
+              + `<details><summary>逐条对照</summary>\n\n| case | status | detail |\n|---|---|---|\n`
+              + `${detail}\n\n</details>\n\n`
+              + `[Actions run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`
               + `/actions/runs/${context.runId})`;
             await github.rest.issues.create({
               owner: context.repo.owner, repo: context.repo.repo,
