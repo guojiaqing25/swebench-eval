@@ -258,6 +258,74 @@ class SummarizeCoverageTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(d["fail_kinds"], {"unspecified": 1})
 
+    # ---- 分组归因（跨文件实验的三列） ----
+
+    def _groups_file(self, mapping: dict[str, str]) -> str:
+        path = os.path.join(self.root, "groups.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(mapping, fh)
+        return path
+
+    def test_groups_are_reported_separately(self) -> None:
+        """三列各自计数、不合并。
+
+        合并成一行会让「upstream 里模型确实会改兄弟文件」这个核心事实被
+        import_scan 的大量零命中稀释掉，读表的人会得出「跨文件没用」的结论。
+        """
+        write_result(self.art, "cov-CVE-1", "CVE-1", "solved")
+        write_result(self.art, "cov-CVE-2", "CVE-2", "test_failed")
+        write_result(self.art, "cov-CVE-3", "CVE-3", "solved")
+        groups = self._groups_file({"CVE-1": "upstream", "CVE-2": "import_scan", "CVE-3": "single"})
+        rc, d = self.run_summary("--groups", groups)
+        self.assertEqual(rc, 0)
+        self.assertEqual(d["by_group"]["upstream"], {"total": 1, "solved": 1,
+                                                    "patched": 1, "patched_solved": 1})
+        self.assertEqual(d["by_group"]["import_scan"]["solved"], 0)
+        self.assertEqual(d["by_group"]["single"]["solved"], 1)
+
+    def test_ungrouped_cases_are_not_dropped(self) -> None:
+        """分组清单漏了某条 case 时，归到 unclassified 而不是丢掉。
+
+        丢掉等于把一个解释不了的结果从表里抹掉；表会更好看，但那张表不再可信。
+        """
+        write_result(self.art, "cov-CVE-1", "CVE-1", "solved")
+        write_result(self.art, "cov-CVE-2", "CVE-2", "solved")
+        write_result(self.art, "cov-CVE-3", "CVE-3", "solved")
+        groups = self._groups_file({"CVE-1": "upstream"})
+        rc, d = self.run_summary("--groups", groups)
+        self.assertEqual(rc, 0)
+        self.assertIn("unclassified", d["by_group"])
+        # 三组之和必须等于 graded，一条都不能消失
+        self.assertEqual(sum(v["total"] for v in d["by_group"].values()), d["graded"])
+
+    def test_no_groups_file_leaves_by_group_empty(self) -> None:
+        """没传 --groups 时 by_group 是空 dict。
+
+        不能给每个 case 都安一个 "unknown" 组，那会让调用方渲染出一张
+        「所有分组都叫 unknown」的表，看上去像分组失败。
+        """
+        write_result(self.art, "cov-CVE-1", "CVE-1", "solved")
+        write_result(self.art, "cov-CVE-2", "CVE-2", "solved")
+        write_result(self.art, "cov-CVE-3", "CVE-3", "solved")
+        rc, d = self.run_summary()
+        self.assertEqual(rc, 0)
+        self.assertEqual(d["by_group"], {})
+
+    def test_group_denominator_excludes_infra(self) -> None:
+        """分组口径也要剔除 infra，与整体口径一致。
+
+        分组自己单算一套分母，就会出现「三列之和少于 graded」这种
+        对不上账的表，读者只能猜差额去哪了。
+        """
+        write_result(self.art, "cov-CVE-1", "CVE-1", "solved")
+        write_result(self.art, "cov-CVE-2", "CVE-2", "infra_error")
+        write_result(self.art, "cov-CVE-3", "CVE-3", "test_failed")
+        groups = self._groups_file({"CVE-1": "upstream", "CVE-2": "upstream", "CVE-3": "single"})
+        rc, d = self.run_summary("--groups", groups)
+        self.assertEqual(rc, 0)
+        self.assertEqual(d["by_group"]["upstream"]["total"], 1)
+        self.assertEqual(sum(v["total"] for v in d["by_group"].values()), d["graded"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

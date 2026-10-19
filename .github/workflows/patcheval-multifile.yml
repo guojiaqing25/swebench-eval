@@ -1,0 +1,271 @@
+name: PatchEval multifile evaluation
+
+# 多文件组的官方判分（放开「可改范围」之后的这一版智能体）。
+#
+# 要回答的问题：
+#   226 条里有一批案例，官方修复必须改到主文件之外的代码。单文件模式把可改
+#   范围锁死在主文件里，这类案例无论补丁写得多好都不可能通过。放开跨文件后
+#   到底能解出多少？这个提升来自哪里？
+#
+# 三种来源必须分开报（这是本 workflow 与 coverage 那份的唯一实质差别）：
+#   upstream     上游数据集断言这些文件确实有漏洞（是事实）
+#   import_scan  我们从 import 关系推出「可能相关」（是猜测）
+#   single       没有兄弟文件，与主结果同条件的对照
+# 合并成一列就没法回答「提升来自上游真给了多文件，还是我们猜对了文件」——
+# 而后者恰恰是这轮改造唯一要证明的事。groups.json 由
+# scripts/stage_patcheval_multifile.py 生成，判分侧只读不猜。
+#
+# 判据与主结果完全一致：docker pull 官方镜像 → git apply → 上游
+# tests/_run_test.sh 退出码。**放开的是能改哪些文件，不是怎么算通过。**
+#
+# 目录分工：
+#   patcheval-coverage/    主结果（单文件生成，历史基线）
+#   patcheval-multifile/   本组（跨文件生成）
+# 两者同源案例集、同源镜像清单、同一份 grade_task.sh。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "patcheval-multifile/patches/**"
+      - "patcheval-multifile/rerun.txt"
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: '只跑指定 case（逗号分隔，留空=全部）'
+        required: false
+        default: ''
+      limit:
+        description: '只跑前 N 条（调试用，留空=全部）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      planned: ${{ steps.matrix.outputs.planned }}
+      only: ${{ steps.matrix.outputs.only }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        shell: python
+        env:
+          ONLY_CASES: ${{ github.event.inputs.cases }}
+          LIMIT: ${{ github.event.inputs.limit }}
+        run: |
+          import json, os
+          manifest = json.load(open("patcheval-multifile/manifest.json", encoding="utf-8"))
+          only = []
+          if os.path.exists("patcheval-multifile/rerun.txt"):
+              raw = open("patcheval-multifile/rerun.txt", encoding="utf-8").read()
+              only = [item.strip() for line in raw.splitlines()
+                      for item in line.split(",") if item.strip()]
+          if not only:
+              only = [x.strip() for x in (os.environ.get("ONLY_CASES") or "").split(",") if x.strip()]
+          if only:
+              known = {m["case_id"] for m in manifest}
+              unknown = [c for c in only if c not in known]
+              if unknown:
+                  # 点名的 case 不在清单里 = 运行配置与清单不同源。静默忽略会
+                  # 让矩阵悄悄变小、分母跟着变小，而这在成绩单上完全看不出来。
+                  print(f"✗ rerun.txt / cases 里有 {len(unknown)} 条不在清单中：{unknown[:10]}")
+                  raise SystemExit(1)
+              manifest = [m for m in manifest if m["case_id"] in only]
+          limit = (os.environ.get("LIMIT") or "").strip()
+          if limit.isdigit() and int(limit) > 0:
+              manifest = manifest[: int(limit)]
+          include = [{"case_id": m["case_id"], "language": m.get("language", "unknown")}
+                     for m in manifest]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+              stream.write("matrix=" + json.dumps({"include": include}, separators=(",", ":")) + "\n")
+              stream.write(f"planned={len(include)}\n")
+              stream.write("only=" + ",".join(m["case_id"] for m in include) + "\n")
+          if not include:
+              print("✗ 计划为空：清单里一条都没有")
+          print(f"cases to grade: {len(include)}")
+
+  grade:
+    needs: prepare
+    if: needs.prepare.outputs.planned != '0'
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch official tests
+        env:
+          CASE_ID: ${{ matrix.case_id }}
+          GRADE_DIR_NAME: patcheval-multifile
+        # 拉取失败不能中断 job：一旦中断，Grade one CVE 不跑 → 没有 result.json
+        # → 该 case 在汇总里静默消失，分母悄悄变小。宁可让 grade_task 判
+        # infra_error，至少它出现在 excluded_infra 里带原因。
+        continue-on-error: true
+        run: bash patcheval-grade/fetch_tests.sh "$CASE_ID"
+      - name: Log in to ghcr (raise anonymous pull limit)
+        continue-on-error: true
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Grade one CVE
+        env:
+          CASE_ID: ${{ matrix.case_id }}
+          GRADE_DIR_NAME: patcheval-multifile
+          GRADE_SCRIPT: patcheval-grade/grade_task.sh
+        run: bash "$GRADE_SCRIPT" "$CASE_ID"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: patcheval-mf-${{ matrix.case_id }}
+          path: |
+            patcheval-multifile/results/
+            /tmp/apply_${{ matrix.case_id }}.log
+            /tmp/test_${{ matrix.case_id }}.log
+          retention-days: 14
+          if-no-files-found: warn
+
+  report:
+    needs: [prepare, grade]
+    if: always() && needs.prepare.outputs.planned != '0'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        # 一条 artifact 都没有时这个 action 会直接失败，report 就停在第一步——
+        # 连「全都没结果」这份最该看到的报告都发不出来。
+        continue-on-error: true
+        with:
+          path: artifacts
+      - name: Aggregate results
+        env:
+          PLANNED_ONLY: ${{ needs.prepare.outputs.only }}
+        run: |
+          mkdir -p summary
+          python3 patcheval-grade/summarize_coverage.py \
+            --artifacts artifacts \
+            --manifest patcheval-multifile/manifest.json \
+            --subset patcheval-coverage/subset58.txt \
+            --groups patcheval-multifile/groups.json \
+            --only "$PLANNED_ONLY" \
+            --out summary/multifile_summary.json || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patcheval-multifile-summary
+          path: summary/
+      - name: Publish multifile issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const d = JSON.parse(fs.readFileSync('summary/multifile_summary.json', 'utf8'));
+            const marker = `<!-- patcheval-multifile:${context.runId}:${context.runAttempt} -->`;
+            const missing = d.missing || [];
+            const groupRows = Object.entries(d.by_group || {})
+              .sort((a, b) => {
+                // upstream 永远第一：它是唯一三列里可信度高的那一列，
+                // 排到别处会被读者当成和 import_scan 同等权重。
+                const order = { upstream: 0, import_scan: 1, single: 2 };
+                const ai = order[a[0]] ?? 9, bi = order[b[0]] ?? 9;
+                return ai !== bi ? ai - bi : b[1].total - a[1].total;
+              })
+              .map(([k, v]) => {
+                const cond = v.patched ? (v.patched_solved / v.patched * 100).toFixed(1) + '%' : '-';
+                return `| ${k} | ${v.solved}/${v.total} | `
+                  + `${(v.solved / v.total * 100).toFixed(1)}% | `
+                  + `${v.patched_solved}/${v.patched} | ${cond} |`;
+              })
+              .join('\n');
+            const langRows = Object.entries(d.by_language || {})
+              .sort((a, b) => b[1].total - a[1].total)
+              .map(([k, v]) => {
+                const cond = v.patched ? (v.patched_solved / v.patched * 100).toFixed(1) + '%' : '-';
+                return `| ${k} | ${v.solved}/${v.total} | ${(v.solved / v.total * 100).toFixed(1)}% | `
+                  + `${v.patched_solved}/${v.patched} | ${cond} |`;
+              })
+              .join('\n');
+            const detail = (d.rows || []).map(r =>
+              `| ${r.case_id} | ${r.status} | ${r.solved ? 'yes' : 'no'} | `
+              + `${String(r.detail || '').replace(/\|/g, '\\|').slice(0, 160)} |`
+            ).join('\n');
+            const infra = d.infra_reasons || [];
+            const infraBlock = infra.length
+              ? `<details><summary>infra 排除明细（${infra.length} 条，未计入分母）`
+                + `</summary>\n\n| case | reason |\n|---|---|\n`
+                + infra.map(r => `| ${r.case_id} | ${String(r.detail).replace(/\|/g, '\\|')} |`).join('\n')
+                + `\n\n</details>\n\n`
+              : '';
+            const body = `${marker}\n\n`
+              + (d.scoped
+                  ? `**定向重跑（本次计划 ${d.manifest_total} 条，非全量）**\n\n`
+                  : `**多文件组全量（Go/JS/Py, CWE 39 类）**\n\n`)
+              + `graded ${d.graded}/${d.total} · solved **${d.solved} `
+              + `(${(d.solve_rate * 100).toFixed(1)}%)** · 排除 infra ${d.excluded_infra} 条\n\n`
+              + (missing.length
+                  ? `⚠ **有 ${missing.length} 条完全没有判分结果**，分母不完整，本次分数不可直接引用：\n\n`
+                    + missing.map(id => `- ${id}`).join('\n') + '\n\n'
+                  : `✅ 分母完整：${d.manifest_total} 条全部有判分结果。\n\n`)
+              + `### 三列归因（不合并）\n\n`
+              + `| 来源 | solved/total | 整体率 | 有补丁 solved/total | 条件率 |\n`
+              + `|---|---|---|---|---|\n${groupRows || '| - | - | - | - | - |'}\n\n`
+              + `读法：\n\n`
+              + `- **upstream**（上游断言这些文件确实有漏洞）：若这一列的条件率明显高于 single 列，`
+              + `说明「放开可改范围」确实是有收益的能力，而不是噪音；\n`
+              + `- **import_scan**（我们按 import 猜的）：若这一列与 single 列无差别，`
+              + `说明我们猜的文件基本没帮上忙——这个结论要照实写，不能因为不好看就并进 upstream；\n`
+              + `- **single**（无兄弟文件）：与主结果同条件的对照，用来判断多文件协议本身有没有副作用。\n\n`
+              + `> 三列刻意不合并。两类来源可信度差一个数量级，合并后无法回答`
+              + `「提升来自上游真给了多文件，还是我们猜对了文件」。\n`
+              + `> **必须与主结果（patcheval-coverage）并列引用。**\n\n`
+              + `**条件通过率**（只算生成了补丁的 case）：`
+              + `solved ${d.patched_solved}/${d.patched_total} `
+              + `(${(d.patched_solve_rate * 100).toFixed(1)}%)`
+              + `——与整体 ${(d.solve_rate * 100).toFixed(1)}% 的差额，就是「补丁没生成出来」那段损失。\n\n`
+              + `状态分布：${JSON.stringify(d.status_counts)}\n\n`
+              + `> 空补丁（no_patch）${d.no_patch} 条、apply_failed ${d.apply_failed} 条，`
+              + `全部计入分母——生成不出、贴不上就是没修好。\n\n`
+              + (Object.keys(d.fail_kinds || {}).length
+                  ? `**失败形态分布**（只统计未通过的 `
+                    + `${Object.values(d.fail_kinds).reduce((a, b) => a + b, 0)} 条）：`
+                    + `\n\n| 形态 | 条数 |\n|---|---|\n`
+                    + Object.entries(d.fail_kinds).map(([k, v]) => `| ${k} | ${v} |`).join('\n')
+                    + `\n\n`
+                  : '')
+              + infraBlock
+              + `### 分语言\n\n`
+              + `| language | 整体 solved/total | 整体率 | 有补丁 solved/total | 条件率 |\n`
+              + `|---|---|---|---|---|\n${langRows || '| - | - | - | - | - |'}\n\n`
+              + `<details><summary>逐条结果</summary>\n\n| case | status | solved | 说明 |\n|---|---|---|---|\n`
+              + `${detail}\n\n</details>\n\n`
+              + `[Actions run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`
+              + `/actions/runs/${context.runId})`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: (d.scoped
+                ? `[PatchEval multifile] 定向重跑 ${d.manifest_total} 条: `
+                : `[PatchEval multifile] run ${context.runId}: `)
+                + `solved ${d.solved}/${d.graded}`,
+              body
+            });
+      - name: Verify denominator is complete
+        # issue 已经发出去了，这里才决定 job 红不红：缺 case 时宁可报失败，
+        # 也不要让一份「分母悄悄变小」的成绩单看起来像正常结果。
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("summary/multifile_summary.json", encoding="utf-8"))
+          missing = d.get("missing") or []
+          if missing:
+              print(f"✗ 分母不完整：{len(missing)} 条无结果 -> {missing[:20]}")
+              sys.exit(1)
+          print(f"✓ 分母完整：{d['manifest_total']} 条全部有结果")
+          PY

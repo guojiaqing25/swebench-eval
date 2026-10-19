@@ -103,6 +103,14 @@ def main() -> int:
              "定向重跑时矩阵只跑其中几条，分母必须跟着缩小，"
              "否则剩下的两百条会被当成「静默丢失」而误报分母不完整。",
     )
+    parser.add_argument(
+        "--groups",
+        default="",
+        help="可选：分组清单 json（{[case_id]: group}）。用于跨文件实验的"
+             "upstream / import_scan / single 三列归因。"
+             "刻意不合并成一行——两类来源可信度差一个数量级，"
+             "合并后就无法回答「提升来自上游真给了多文件，还是我们猜对了文件」。",
+    )
     args = parser.parse_args()
 
     manifest = json.load(open(args.manifest, encoding="utf-8"))
@@ -174,6 +182,17 @@ def main() -> int:
     sub_rows = [r for r in graded if str(r.get("case_id")) in subset58]
     sub_solved = sum(1 for r in sub_rows if r.get("solved"))
 
+    # 分组归因（仅当传了 --groups）。当前唯一用途是跨文件实验的三列：
+    # upstream（上游断言这些文件确实有漏洞）/ import_scan（我们按 import 猜的）/
+    # single（没有兄弟文件的对照）。三列必须并列呈现、不合并，
+    # 理由见 docs/patcheval_evaluation_integrity.md 第九节。
+    # 分组缺失的 case 归到 "unclassified" 而不是丢弃：丢一条就等于把
+    # 一个我们解释不了的结果从表里抹掉，那种表看着整齐但不可信。
+    by_group: dict[str, dict[str, int]] = {}
+    if args.groups and os.path.exists(args.groups):
+        group_of = json.load(open(args.groups, encoding="utf-8"))
+        by_group = bucket(graded, lambda r: str(group_of.get(str(r.get("case_id")), "unclassified")))
+
     payload = {
         # manifest_total 现在是「本次计划范围」的条数：全量跑=226，定向重跑=计划的那几条。
         # 分母永远等于计划，而不是永远等于 226——否则定向重跑每次都会红。
@@ -207,6 +226,9 @@ def main() -> int:
             "solved": sub_solved,
             "solve_rate": (sub_solved / len(sub_rows)) if sub_rows else 0.0,
         },
+        # 空 dict 表示本次没传 --groups；调用方据此决定要不要渲染这张表，
+        # 而不是把空表渲染成「所有分组都是 0」。
+        "by_group": by_group,
         "rows": rows,
     }
 
@@ -216,6 +238,10 @@ def main() -> int:
         f"graded={len(graded)} solved={solved} excluded_infra={payload['excluded_infra']} "
         f"missing={len(missing)} status={dict(counts)}"
     )
+    if by_group:
+        for name, slot in sorted(by_group.items()):
+            rate = slot["solved"] / slot["total"] * 100 if slot["total"] else 0.0
+            print(f"  [{name}] {slot['solved']}/{slot['total']} = {rate:.1f}%")
     if missing:
         print(f"✗ 有 {len(missing)} 条 case 没有任何判分结果：{missing[:10]}")
         return 1
