@@ -39,6 +39,10 @@ on:
         description: '只跑前 N 条（调试用，留空=全部）'
         required: false
         default: ''
+      harness:
+        description: '判分入口：livecve（历史口径，默认）或 official（官方 PatchEval-Verified fix-run.sh）'
+        required: false
+        default: 'livecve'
 
 permissions:
   contents: read
@@ -121,6 +125,7 @@ jobs:
           CASE_ID: ${{ matrix.case_id }}
           GRADE_DIR_NAME: patcheval-multifile
           GRADE_SCRIPT: patcheval-grade/grade_task.sh
+          GRADE_HARNESS: ${{ github.event.inputs.harness || 'livecve' }}
         run: bash "$GRADE_SCRIPT" "$CASE_ID"
       - uses: actions/upload-artifact@v4
         if: always()

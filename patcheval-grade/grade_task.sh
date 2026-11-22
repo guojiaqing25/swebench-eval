@@ -20,6 +20,12 @@ PATCH_FILE="$GRADE_DIR/patches/$CASE.diff"
 TESTS_DIR="$GRADE_DIR/tests/$CASE"
 RESULT_DIR="$GRADE_DIR/results"
 RESULT_FILE="$RESULT_DIR/$CASE.json"
+# 判分入口二选一：
+#   livecve  （默认，历史口径）LiveCVEBench 提取的 tests/_run_test.sh
+#   official （官方 PatchEval-Verified 口径）镜像内置 /workspace/fix-run.sh
+# 两者判据都是「退出码 0 = 通过」，但测试来源不同。要跟官方 leaderboard 比较时
+# 必须用 official；历史数据仍是 livecve 口径，不能混报。
+HARNESS="${GRADE_HARNESS:-livecve}"
 mkdir -p "$RESULT_DIR"
 
 emit() {  # emit <status> <detail> [extra_json]
@@ -43,7 +49,7 @@ if [ ! -f "$PATCH_FILE" ] || [ ! -s "$PATCH_FILE" ]; then
   emit no_patch "补丁为空"
   exit 0
 fi
-if [ ! -f "$TESTS_DIR/_run_test.sh" ]; then
+if [ "$HARNESS" != "official" ] && [ ! -f "$TESTS_DIR/_run_test.sh" ]; then
   emit infra_error "缺少官方 tests/_run_test.sh"
   exit 0
 fi
@@ -73,11 +79,16 @@ if [ -z "$IMAGE" ]; then
   exit 0
 fi
 
-# 仓库目录从官方测试脚本解析（其内含 cd /workspace/<repo>），不猜
-REPO_DIR=$(grep -oE 'cd /workspace/[A-Za-z0-9_.:-]+' "$TESTS_DIR/_run_test.sh" | head -1 | sed 's|cd /workspace/||')
-if [ -z "$REPO_DIR" ]; then
-  emit infra_error "无法从 _run_test.sh 解析仓库目录"
-  exit 0
+# 仓库目录：livecve 口径从测试脚本解析（其内含 cd /workspace/<repo>）；
+# official 口径由镜像内 fix-run.sh 自己处理，这里只为记录 IMAGE_HEAD 尽力找。
+if [ "$HARNESS" = "official" ]; then
+  REPO_DIR=""
+else
+  REPO_DIR=$(grep -oE 'cd /workspace/[A-Za-z0-9_.:-]+' "$TESTS_DIR/_run_test.sh" | head -1 | sed 's|cd /workspace/||')
+  if [ -z "$REPO_DIR" ]; then
+    emit infra_error "无法从 _run_test.sh 解析仓库目录"
+    exit 0
+  fi
 fi
 
 echo "[grade] $CASE image=$IMAGE repo=/workspace/$REPO_DIR"
@@ -94,35 +105,63 @@ cleanup() { docker rm -f "$CID" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 # 记录镜像内 commit（与数据集记录比对，用于区分「补丁错」与「环境不一致」）
-IMAGE_HEAD=$(docker exec "$CID" bash -lc "cd /workspace/$REPO_DIR 2>/dev/null && git rev-parse HEAD" 2>/dev/null || echo "")
-
-docker cp "$PATCH_FILE" "$CID:/tmp/model.patch" >/dev/null 2>&1
-docker cp "$TESTS_DIR/." "$CID:/tests" >/dev/null 2>&1 || {
-  emit infra_error "测试文件拷贝失败"
-  exit 0
-}
-
-# 1) 应用模型补丁
-APPLY_LOG=/tmp/apply_$CASE.log
-if ! docker exec "$CID" bash -lc "cd /workspace/$REPO_DIR && git apply -v --whitespace=nowarn /tmp/model.patch" > "$APPLY_LOG" 2>&1; then
-  if ! docker exec "$CID" bash -lc "cd /workspace/$REPO_DIR && git apply -v --3way --whitespace=nowarn /tmp/model.patch" >> "$APPLY_LOG" 2>&1; then
-    tail -c 800 "$APPLY_LOG" > /tmp/apply_tail_$CASE.txt
-    DETAIL=$(python3 -c "print(open('/tmp/apply_tail_$CASE.txt').read()[-400:].replace(chr(10),' '))")
-    emit apply_failed "$DETAIL" "{\"image_head\":\"$IMAGE_HEAD\"}"
-    exit 0
-  fi
+if [ -n "$REPO_DIR" ]; then
+  IMAGE_HEAD=$(docker exec "$CID" bash -lc "cd /workspace/$REPO_DIR 2>/dev/null && git rev-parse HEAD" 2>/dev/null || echo "")
+else
+  IMAGE_HEAD=$(docker exec "$CID" bash -lc 'cd /workspace && ls -d */ 2>/dev/null | head -1 | xargs -I{} git -C {} rev-parse HEAD 2>/dev/null' || echo "")
 fi
 
-# 2) 跑官方测试（脚本内部会 rm 旧测试文件 + git apply test.patch + 执行真实测试）
-#    单条测试必须设上限：部分任务依赖 D-Bus/网络服务，会永久挂起（如 CVE-2015-1326）
 TEST_LOG=/tmp/test_$CASE.log
 TEST_TIMEOUT="${TEST_TIMEOUT_SECONDS:-240}"
-timeout "$TEST_TIMEOUT" docker exec "$CID" bash /tests/_run_test.sh > "$TEST_LOG" 2>&1
-RC=$?
+
+if [ "$HARNESS" = "official" ]; then
+  # 官方 PatchEval-Verified 入口：补丁放 /workspace/fix.patch，由镜像内
+  # fix-run.sh 自己应用补丁、重置测试文件、执行 PoC/功能测试。
+  # 这与官方 run_evaluation.py 的做法一致（它也只挂载 fix.patch）。
+  if ! docker exec "$CID" bash -lc 'test -f /workspace/fix-run.sh'; then
+    emit infra_error "镜像缺少 /workspace/fix-run.sh（无法按官方口径判分）"
+    exit 0
+  fi
+  docker cp "$PATCH_FILE" "$CID:/workspace/fix.patch" >/dev/null 2>&1 || {
+    emit infra_error "补丁拷贝到 /workspace/fix.patch 失败"
+    exit 0
+  }
+  timeout "$TEST_TIMEOUT" docker exec "$CID" bash -lc 'cd /workspace && bash fix-run.sh' > "$TEST_LOG" 2>&1
+  RC=$?
+  # fix-run.sh 把「补丁贴不上」也记成非 0。从日志单独识别，保留
+  # apply_failed 与 test_failed 的可区分性（不改变通过判据：只认退出码）。
+  if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ] && grep -qiE 'patch does not apply|patch failed|error: patch|No such file or directory.*\.patch' "$TEST_LOG"; then
+    APPLY_TAIL=$(python3 -c "print(open('$TEST_LOG').read()[-400:].replace(chr(10),' '))")
+    emit apply_failed "$APPLY_TAIL" "{\"image_head\":\"$IMAGE_HEAD\",\"harness\":\"official\"}"
+    exit 0
+  fi
+else
+  docker cp "$PATCH_FILE" "$CID:/tmp/model.patch" >/dev/null 2>&1
+  docker cp "$TESTS_DIR/." "$CID:/tests" >/dev/null 2>&1 || {
+    emit infra_error "测试文件拷贝失败"
+    exit 0
+  }
+
+  # 1) 应用模型补丁
+  APPLY_LOG=/tmp/apply_$CASE.log
+  if ! docker exec "$CID" bash -lc "cd /workspace/$REPO_DIR && git apply -v --whitespace=nowarn /tmp/model.patch" > "$APPLY_LOG" 2>&1; then
+    if ! docker exec "$CID" bash -lc "cd /workspace/$REPO_DIR && git apply -v --3way --whitespace=nowarn /tmp/model.patch" >> "$APPLY_LOG" 2>&1; then
+      tail -c 800 "$APPLY_LOG" > /tmp/apply_tail_$CASE.txt
+      DETAIL=$(python3 -c "print(open('/tmp/apply_tail_$CASE.txt').read()[-400:].replace(chr(10),' '))")
+      emit apply_failed "$DETAIL" "{\"image_head\":\"$IMAGE_HEAD\"}"
+      exit 0
+    fi
+  fi
+
+  # 2) 跑官方测试（脚本内部会 rm 旧测试文件 + git apply test.patch + 执行真实测试）
+  #    单条测试必须设上限：部分任务依赖 D-Bus/网络服务，会永久挂起（如 CVE-2015-1326）
+  timeout "$TEST_TIMEOUT" docker exec "$CID" bash /tests/_run_test.sh > "$TEST_LOG" 2>&1
+  RC=$?
+fi
 if [ "$RC" -eq 0 ]; then
-  emit solved "官方测试通过" "{\"image_head\":\"$IMAGE_HEAD\"}"
+  emit solved "官方测试通过" "{\"image_head\":\"$IMAGE_HEAD\",\"harness\":\"$HARNESS\"}"
 elif [ "$RC" -eq 124 ]; then
-  emit test_timeout "测试超过 ${TEST_TIMEOUT}s 未返回（判定为测试未通过，非基础设施故障）" "{\"image_head\":\"$IMAGE_HEAD\"}"
+  emit test_timeout "测试超过 ${TEST_TIMEOUT}s 未返回（判定为测试未通过，非基础设施故障）" "{\"image_head\":\"$IMAGE_HEAD\",\"harness\":\"$HARNESS\"}"
 else
   # detail 取日志尾部 400 字符：这是给人看的一句话结论，不是诊断材料。
   # 尾部截断会把首个单词切掉（"AssertionError" 变成 "tionError"），
@@ -183,10 +222,11 @@ print(json.dumps({"fail_kind": kind, "fail_lines": picked}, ensure_ascii=False))
 PY
 )
   emit test_failed "$DETAIL" "$(
-    python3 - "$SIGNALS" "$IMAGE_HEAD" <<'PY'
+    python3 - "$SIGNALS" "$IMAGE_HEAD" "$HARNESS" <<'PY'
 import json, sys
 signals = json.loads(sys.argv[1] or "{}")
 signals["image_head"] = sys.argv[2]
+signals["harness"] = sys.argv[3]
 print(json.dumps(signals, ensure_ascii=False))
 PY
   )"
